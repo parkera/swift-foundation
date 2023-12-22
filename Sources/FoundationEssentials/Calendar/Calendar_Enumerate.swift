@@ -433,7 +433,7 @@ extension Calendar {
 
          Ex: { Month: 6, Day: 31 } does not exist so if nextTime is set, we pass '2016-07-01 07:00:00 +0000' to the block.
          */
-        let compsToMatch = _adjustedComponents(matchingComponents, date: searchingDate, direction: direction)
+        let compsToMatch = try _adjustedComponents(matchingComponents, date: searchingDate, direction: direction)
 
         guard let unadjustedMatchDate = try _matchingDate(after: searchingDate, matching: compsToMatch, direction: direction, matchingPolicy: matchingPolicy, repeatedTimePolicy: repeatedTimePolicy) else {
             // TODO: Check if returning the same searchingDate has any purpose
@@ -533,22 +533,48 @@ extension Calendar {
 
     // MARK: -
 
-    func _adjustedComponents(_ comps: DateComponents, date: Date, direction: SearchDirection) -> DateComponents {
+    func _adjustedComponents(_ comps: DateComponents, date: Date, direction: SearchDirection) throws -> DateComponents {
         // This method ensures that the algorithm enumerates through each year or month if they are not explicitly set in the DateComponents passed into enumerateDates.  This only applies to cases where the highest set unit is month or day (at least for now).  For full in context explanation, see where it gets called in enumerateDates.
 
-        let highestSetUnit = comps.highestSetUnit
+        let highestSetUnit = comps.lowestSetUnit
         switch highestSetUnit {
         case .some(.month):
             var adjusted = comps
-            adjusted.year = component(.year, from: date)
-            // TODO: can year ever be nil here?
-            if let adjustedDate = self.date(from: adjusted) {
-                if direction == .forward && date > adjustedDate {
-                    adjusted.year = adjusted.year! + 1
-                } else if direction == .backward && date < adjustedDate {
-                    adjusted.year = adjusted.year! - 1
+            let year = component(.year, from: date)
+            adjusted.year = year
+            guard let adjustedDate = self.date(from: adjusted) else {
+                throw CalendarEnumerationError.dateOutOfRange(.year, date)
+            }
+            
+            if direction == .forward && date > adjustedDate {
+                adjusted.year = year + 1
+            } else if direction == .backward && date < adjustedDate {
+                adjusted.year = year - 1
+            }
+            
+            /*
+            switch direction {
+            case .backward:
+                let dateMonth = component(.month, from: date)
+                // This components value should be set for us to be in this branch in the first place
+                if comps.month! >= dateMonth {
+                    guard let tempDate = self.date(byAdding: .year, value: -1, to: date) else {
+                        throw CalendarEnumerationError.dateOutOfRange(.year, date)
+                    }
+                    
+                    adjusted.year = component(.year, from: tempDate)
+                } else {
+                    let dateYear = component(.year, from: date)
+                    adjusted.year = dateYear
+                }
+            case .forward:
+                let dateMonth = component(.month, from: date)
+                if comps.month! > dateMonth {
+                    adjusted.year = component(.year, from: date)
                 }
             }
+            */
+            
             return adjusted
         case .some(.day):
             var adjusted = comps
@@ -556,7 +582,9 @@ extension Calendar {
                 let dateDay = component(.day, from: date)
                 // We need to make sure we don't surpass the day we want
                 if comps.day ?? Int.max >= dateDay {
-                    let tempDate = self.date(byAdding: .month, value: -1, to: date)! // TODO: Check force unwrap here
+                    guard let tempDate = self.date(byAdding: .month, value: -1, to: date) else {
+                        throw CalendarEnumerationError.dateOutOfRange(.month, date)
+                    }
                     adjusted.month = component(.month, from: tempDate)
                 } else {
                     // adjusted is the date components we're trying to match against; dateDay is the current day of the current search date.
@@ -570,8 +598,8 @@ extension Calendar {
                     //
                     // We can only adjust the month if it won't cause us to search "backwards" in time (causing us to elsewhere end up skipping the first [correct] match we find).
                     // These same changes apply to the backwards case above.
-                    let dateDay = component(.month, from: date)
-                    adjusted.month = dateDay
+                    let dateMonth = component(.month, from: date)
+                    adjusted.month = dateMonth
                 }
             } else {
                 let dateDay = component(.day, from: date)
@@ -924,7 +952,7 @@ extension Calendar {
         }
 
         compsCopy.isLeapMonth = true
-        let beginMonthAfterNonLeap = foundRange.start + foundRange.duration
+        let beginMonthAfterNonLeap = foundRange.end
 
         // Now we see if we find the date we want in what we hope is the leap month.
         if let possibleLeapDateMatch = try _matchingDate(after: beginMonthAfterNonLeap, matching: compsCopy, direction: direction, matchingPolicy: matchingPolicy, repeatedTimePolicy: repeatedTimePolicy) {
@@ -964,7 +992,7 @@ extension Calendar {
             if matchingPolicy == .nextTime {
                 // We want the beginning of the next month
                 if let nonLeapFoundRange = dateInterval(of: .month, for: beginMonthAfterNonLeap) {
-                    result = nonLeapFoundRange.start + nonLeapFoundRange.duration
+                    result = nonLeapFoundRange.end
                 }
             } else {
                 var dateToUse: Date?
@@ -973,13 +1001,13 @@ extension Calendar {
                     compsCopy.isLeapMonth = false
                     compsCopy.day = 1
                     if let nonLeapFoundRange = dateInterval(of: .day, for: beginMonthAfterNonLeap) {
-                        let nextDay = nonLeapFoundRange.start + nonLeapFoundRange.duration
+                        let nextDay = nonLeapFoundRange.end
                         dateToUse = try _matchingDate(after: nextDay, matching: compsCopy, direction: .forward, matchingPolicy: matchingPolicy, repeatedTimePolicy: repeatedTimePolicy)
                     }
                 } else {
                     // match previous preserving smaller units
                     if let nonLeapFoundRange = dateInterval(of: .month, for: beginMonthAfterNonLeap) {
-                        let lastDayEnd = nonLeapFoundRange.start + nonLeapFoundRange.duration - 1
+                        let lastDayEnd = nonLeapFoundRange.end - 1
                         let monthDayComps = _dateComponents(.init(.month, .day), from: lastDayEnd)
                         compsCopy.month = monthDayComps.month
                         compsCopy.day = monthDayComps.day
@@ -1466,90 +1494,73 @@ extension Calendar {
     }
 
     private func dateAfterMatchingMonth(startingAt startDate: Date, components: DateComponents, direction: SearchDirection, strictMatching: Bool) throws -> Date? {
-        guard let month = components.month else {
+        guard let targetMonth = components.month else {
             // Nothing to do
             return nil
         }
 
-        let isChineseCalendar = self.identifier == .chinese
-        let isLeapMonthDesired = isChineseCalendar && (components.isLeapMonth ?? false)
-
-        // After this point, result is at least startDate
-        var result = startDate
-        var dateMonth = component(.month, from: result)
-        if month != dateMonth {
+        let targetIsLeapMonth: Bool?
+        if let isLeap = components.isLeapMonth, self.identifier == .chinese && strictMatching {
+            // In the Chinese calendar, the leap month has the same month number as the preceding month.
+            // If we're searching forwards in time looking for a leap month, we need to skip the first occurrence we found of that month number because the first occurrence would not be the leap month.
+            // However, we only do this is if we are matching strictly. If we don't care about strict matching, we can skip this and let the caller handle it so it can deal with the approximations if necessary.
+            targetIsLeapMonth = isLeap
+        } else {
+            targetIsLeapMonth = nil
+        }
+        
+        func calculateComponents(for date: Date) throws -> (Int /* month */, Bool? /* leap month */, DateInterval /* month range */, Date /* next result */) {
+            // Calculate components
+            var resultComps = _dateComponents(.month, from: date)
+            
+            // clear isLeapMonth if it is not relevant to result
+            if targetIsLeapMonth == nil {
+                resultComps.isLeapMonth = nil
+            }
+            
+            guard let resultMonthRange = dateInterval(of: .month, for: date) else {
+                throw CalendarEnumerationError.dateOutOfRange(.month, date)
+            }
+            
+            guard let resultMonth = resultComps.month else {
+                throw CalendarEnumerationError.dateOutOfRange(.month, date)
+            }
+            
+            return (resultMonth, resultComps.isLeapMonth, resultMonthRange, date)
+        }
+        
+        var resultMonth: Int
+        var resultIsLeapMonth: Bool?
+        var resultMonthRange: DateInterval
+        var result: Date
+        (resultMonth, resultIsLeapMonth, resultMonthRange, result) = try calculateComponents(for: startDate)
+        
+        // Enter the loop if we are either in the wrong month, or the right month number but the leap-month-ness is not correct
+        if resultMonth != targetMonth || resultIsLeapMonth != targetIsLeapMonth {
             repeat {
                 let lastResult = result
                 
-                guard let foundRange = dateInterval(of: .month, for: result) else {
-                    throw CalendarEnumerationError.dateOutOfRange(.month, result)
-                }
-                var duration = foundRange.duration
+                switch direction {
+                case .forward:
+                    // Our next try will be at the instant after the current range ends
+                    (resultMonth, resultIsLeapMonth, resultMonthRange, result) = try calculateComponents(for: resultMonthRange.end)
 
-                if direction == .backward {
-                    let numMonth = component(.month, from: foundRange.start)
-                    if numMonth == 3 && (self.identifier == .gregorian || self.identifier == .buddhist || self.identifier == .japanese || self.identifier == .iso8601 || self.identifier == .republicOfChina) {
-                        // Take it back 3 days so we land in february.  That is, March has 31 days, and Feb can have 28 or 29, so to ensure we get to either Feb 1 or 2, we need to take it back 3 days.
-                        duration -= 86400 * 3
-                    } else {
-                        // Take it back a day
-                        duration -= 86400
-                    }
-
-                    // So we can go backwards in time
-                    duration *= -1
-                }
-
-                let searchDate = foundRange.start + duration
-                dateMonth = component(.month, from: searchDate)
-                result = searchDate
-                
-                try verifyAdvancingResult(result, previous: lastResult, direction: direction)
-            } while month != dateMonth
-        }
-
-        // As far as we know, this is only relevant for the Chinese calendar.  In that calendar, the leap month has the same month number as the preceding month.
-        // If we're searching forwards in time looking for a leap month, we need to skip the first occurrence we found of that month number because the first occurrence would not be the leap month; however, we only do this is if we are matching strictly. If we don't care about strict matching, we can skip this and let the caller handle it so it can deal with the approximations if necessary.
-        if isLeapMonthDesired && strictMatching {
-            // Check to see if we are already at a leap month
-            let isLeapMonth = _dateComponents(.month, from: result).isLeapMonth ?? false
-            if !isLeapMonth {
-                var searchDate = result
-                repeat {
-                    let lastResult = searchDate
+                case .backward:
+                    // Our next try will be at the instant before the range starts
+                    (resultMonth, resultIsLeapMonth, resultMonthRange, result) = try calculateComponents(for: resultMonthRange.start - 1)
                     
-                    guard let leapMonthInterval = dateInterval(of: .month, for: searchDate) else {
-                        throw CalendarEnumerationError.dateOutOfRange(.month, searchDate)
-                    }
-                    var duration = leapMonthInterval.duration
-                    if direction == .backward {
-                        // Months in the Chinese calendar can be either 29 days ("short month") or 30 days ("long month").  We need to account for this when moving backwards in time so we don't end up accidentally skipping months.  If leapMonthBegin is 30 days long, we need to subtract from that 30 so we don't potentially skip over the previous short month.
-                        // Also note that some days aren't exactly 24hrs long, so we can end up with lengthOfMonth being something like 29.958333333332, for example.  This is a (albeit hacky) way of getting around that.
-                        let lengthOfMonth = duration / 86400
-                        if lengthOfMonth > 30 {
-                            duration -= 86400 * 2
-                        } else if lengthOfMonth > 28 {
-                            duration -= 86400
-                        }
-
-                        duration *= -1
-                    }
-
-                    let possibleLeapMonth = leapMonthInterval.start + duration
-                    // Note: setting month also tells Calendar to set leapMonth at the same time
-                    let monthComps = _dateComponents(.month, from: possibleLeapMonth)
-                    let dateMonth = monthComps.month ?? Int.max
-                    if dateMonth == month && monthComps.isLeapMonth ?? false {
-                        result = possibleLeapMonth
-                        break
-                    } else {
-                        searchDate = possibleLeapMonth
-                    }
-
-                    try verifyAdvancingResult(searchDate, previous: lastResult, direction: direction)
-                } while true
-            }
+                    // Reset result to the start of the found range (this is the range of the month we just found)
+                    result = resultMonthRange.start
+                }
+                try verifyAdvancingResult(result, previous: lastResult, direction: direction)
+            } while resultMonth != targetMonth || resultIsLeapMonth != targetIsLeapMonth
         }
+        /* TODO */
+        /*
+        else {
+            // Reset to the beginning of the range, because smaller units may not be set
+            result = resultMonthRange.start
+        }*/
 
         return result
     }
@@ -1816,7 +1827,7 @@ extension Calendar {
         if month != nil && direction == .backward {
             // Are we in the right month already?  If we are and backwards is set, we should move to the beginning of the last day of the month and work backwards.
             if let foundRange = dateInterval(of: .month, for: result) {
-                let tempSearchDate = foundRange.start + foundRange.duration - 1
+                let tempSearchDate = foundRange.end - 1
                 // Check the order to make sure we didn't jump ahead of the start date
                 if tempSearchDate > originalStartDate {
                     // We went too far ahead.  Just go back to using the start date as our upper bound.
@@ -1871,7 +1882,7 @@ extension Calendar {
                     }
                 } else {
                     // This is always correct to do since we are using today's length on today -- there can't be a mismatch.
-                    tempSearchDate = foundRange.start + foundRange.duration
+                    tempSearchDate = foundRange.end
                  }
 
                 dateDay = component(.day, from: tempSearchDate)

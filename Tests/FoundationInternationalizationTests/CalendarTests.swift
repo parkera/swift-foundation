@@ -420,7 +420,7 @@ final class CalendarTests : XCTestCase {
         XCTAssertFalse(loopedForever)
         XCTAssertNotNil(foundDate)
         // Expected 1126-10-18 07:52:58 +0000
-        XCTAssertEqual(foundDate!.timeIntervalSinceReferenceDate, -27586714022)
+        XCTAssertEqual(foundDate, Date(timeIntervalSinceReferenceDate: -27586714022))
     }
 
     func test_dateFromComponentsNearDSTTransition() {
@@ -665,49 +665,84 @@ final class CalendarTests : XCTestCase {
         _ = calendar.nextDate(after: date, matching: components, matchingPolicy: .previousTimePreservingSmallerComponents)
     }
     
+    func test_minutes() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(name: "Europe/London")!
+        
+        let d = Date(timeIntervalSinceReferenceDate: 724717466.58642602) // minute 24
+        print(d)
+        let dc = DateComponents(minute: 24)
+        let date = calendar.nextDate(after: d, matching: dc, matchingPolicy: .nextTime, direction: .backward)
+        print(date!)
+    }
+
+    func test_backwardsDays() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(name: "Europe/London")!
+
+        let date = Date(timeIntervalSinceReferenceDate: 724641510) /* 2023-12-19 01:18:30 +0000 */
+        let comps = DateComponents(day: 19)
+        
+        let forward = calendar.nextDate(after: date, matching: comps, matchingPolicy: .nextTime, direction: .forward)
+        XCTAssertEqual(forward, Date(timeIntervalSinceReferenceDate: 727315200) /* 2024-01-19 */)
+        
+        let backward = calendar.nextDate(after: date, matching: comps, matchingPolicy: .nextTime, direction: .backward)
+        XCTAssertEqual(backward, Date(timeIntervalSinceReferenceDate: 722044800) /* 2023-11-19 */)
+    }
+    
     func test_backwardsMonths() {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(name: "Europe/London")!
         
         let septemberDateComponents = DateComponents(month: 9)
-        let decemberDate = Date(timeIntervalSinceReferenceDate: 724641510)
+        let decemberDate = Date(timeIntervalSinceReferenceDate: 724641510) /* 2023-12-19 01:18:30 +0000 */
         let septemberDate = calendar.nextDate(after: decemberDate, matching: septemberDateComponents, matchingPolicy: .nextTime, direction: .backward)
         XCTAssertEqual(septemberDate, Date(timeIntervalSinceReferenceDate: 715215600) /* 2023-09-01 */)
 
-        // Verify wrapping one year
+        // Verify that we go back an entire year to find the previous December
         let decemberDateComponents = DateComponents(month: 12)
         let lastDecemberDate = calendar.nextDate(after: decemberDate, matching: decemberDateComponents, matchingPolicy: .nextTime, direction: .backward)
-        XCTAssertEqual(lastDecemberDate, Date(timeIntervalSinceReferenceDate: 0 /* TODO */) /* 2023-09-01 */)
+        XCTAssertEqual(lastDecemberDate, Date(timeIntervalSinceReferenceDate: 691545600) /* 2022-12-01 */)
 
+        // Verify that we go forward an entire year
+        let lastDecemberDateForward = calendar.nextDate(after: decemberDate, matching: decemberDateComponents, matchingPolicy: .nextTime, direction: .forward)
+        XCTAssertEqual(lastDecemberDateForward, Date(timeIntervalSinceReferenceDate: 754704000) /* 2024-12-01 */)
+
+        // Verify that we stay in the same month, plus day
+        let december3DateComponents = DateComponents(month: 12, day: 3)
+        let lastDecember3Date = calendar.nextDate(after: decemberDate, matching: december3DateComponents, matchingPolicy: .nextTime, direction: .backward)
+        XCTAssertEqual(lastDecember3Date, Date(timeIntervalSinceReferenceDate: 723254400) /* 2023-12-03 */)
+        
         // Verify months near leap year
         let februaryDateComponents = DateComponents(month: 2)
         let december2024Date = Date(timeIntervalSinceReferenceDate: 756177510)
         let feb2024Date = calendar.nextDate(after: december2024Date, matching: februaryDateComponents, matchingPolicy: .nextTime, direction: .backward)
         XCTAssertEqual(feb2024Date, Date(timeIntervalSinceReferenceDate: 728438400) /* 2024-02-01 */)
 
+        let expectedBackwards = [694224000.0, 696902400.0, 699321600.0, 701996400.0, 704588400.0, 707266800.0, 709858800.0, 712537200.0, 715215600.0, 717807600.0, 720489600.0, 723081600.0].map { Date(timeIntervalSinceReferenceDate: $0) }
+        var resultsBackwards: [Date] = []
+        
+        for i in 1...12 {
+            let dc = DateComponents(month: i)
+            let date = calendar.nextDate(after: decemberDate, matching: dc, matchingPolicy: .nextTime, direction: .backward)
+            resultsBackwards.append(date!)
+        }
+        
+        XCTAssertEqual(expectedBackwards, resultsBackwards)
+        
+        let expectedForwards = [725760000.0, 728438400.0, 730944000.0, 733618800.0, 736210800.0, 738889200.0, 741481200.0, 744159600.0, 746838000.0, 749430000.0, 752112000.0, 754704000.0].map { Date(timeIntervalSinceReferenceDate: $0) }
+        
+        var resultsForwards: [Date] = []
+        
         for i in 1...12 {
             let dc = DateComponents(month: i)
             let date = calendar.nextDate(after: decemberDate, matching: dc, matchingPolicy: .nextTime, direction: .forward)
-            print(date!)
-            
-            /*
-             TODO: This is still not right
-             2023-01-01 00:00:00 +0000
-             2023-02-01 00:00:00 +0000
-             2023-03-01 00:00:00 +0000
-             2023-03-31 23:00:00 +0000
-             2023-04-30 23:00:00 +0000
-             2023-05-31 23:00:00 +0000
-             2023-06-30 23:00:00 +0000
-             2023-07-31 23:00:00 +0000
-             2023-08-31 23:00:00 +0000
-             2023-09-30 23:00:00 +0000
-             2023-11-01 00:00:00 +0000
-             2022-12-31 23:59:59 +0000 -- expected 2022-12-01
-             */
+            resultsForwards.append(date!)
         }
+        
+        XCTAssertEqual(expectedForwards, resultsForwards)
     }
-    
+        
     func test_chineseLeapMonthNonExistentDay() {
         var cal = Calendar(identifier: .chinese)
         cal.timeZone = TimeZone(identifier: "America/Los_Angeles")!
@@ -715,15 +750,22 @@ final class CalendarTests : XCTestCase {
         // Leap month 4, day 30 doesn't exist in leap month
         var components = DateComponents(era: 78, year: 29, month: 4, day: 30, hour: 2, minute: 45, second: 35)
         
-        // 2012-05-19 07:00:00 +0000 -- Note: order matters here.  If you set leapMonth before this line, you'll get a different date.
-        var date = cal.date(from: components)!
+        // 2012-05-20 09:45:35 -- Note: order matters here.  If you set leapMonth before this line, you'll get a different date.
+        let date = cal.date(from: components)!
         
         components.isLeapMonth = true
-                
+          
+        let calComp: Set<Calendar.Component> = [.era, .year, .month, .day, .hour, .minute, .second]
+        
+        var retDate: Date?
+        var expectedDate: Date
+        var retDateComps: DateComponents
+        var expectedComps: DateComponents
+
         /*
          *** Strictly ***
          */
-        var retDate = cal.nextDate(after: date, matching: components, matchingPolicy: .strict)
+        retDate = cal.nextDate(after: date, matching: components, matchingPolicy: .strict)
         XCTAssertNil(retDate)
         
         retDate = cal.nextDate(after: date, matching: components, matchingPolicy: .strict, direction: .backward)
@@ -743,13 +785,13 @@ final class CalendarTests : XCTestCase {
          */
 
         retDate = cal.nextDate(after: date, matching: components, matchingPolicy: .previousTimePreservingSmallerComponents)
-        var expectedDate = Date(timeIntervalSinceReferenceDate: 361705535) // 2012-06-18 09:45:35 +0000
+        expectedDate = Date(timeIntervalSinceReferenceDate: 361705535) // 2012-06-18 09:45:35 +0000
         XCTAssertEqual(retDate, expectedDate)
         
-        let calComp: Set<Calendar.Component> = [.era, .year, .month, .day, .hour, .minute, .second]
+
         
-        var retDateComps = cal.dateComponents(calComp, from: retDate!)
-        var expectedComps = cal.dateComponents(calComp, from: expectedDate)
+        retDateComps = cal.dateComponents(calComp, from: retDate!)
+        expectedComps = cal.dateComponents(calComp, from: expectedDate)
         XCTAssertEqual(retDateComps, expectedComps)
         XCTAssertEqual(retDateComps.isLeapMonth, expectedComps.isLeapMonth)
         
@@ -768,7 +810,6 @@ final class CalendarTests : XCTestCase {
          Minute: 45
          Second: 35
          */
-        
         retDate = cal.nextDate(after: date, matching: components, matchingPolicy: .nextTimePreservingSmallerComponents)
         expectedDate = Date(timeIntervalSinceReferenceDate: 361791935) // 2012-06-19 09:45:35 +0000
         XCTAssertEqual(expectedDate, retDate)
@@ -829,16 +870,16 @@ final class CalendarTests : XCTestCase {
         var cal = Calendar(identifier: .chinese)
         cal.timeZone = TimeZone(identifier: "America/Los_Angeles")!
         var results: [Date] = []
-
+        
         var birthday = DateComponents(calendar: cal, month: 4, day: 15)
-        var startComponents = DateComponents(era: 78, year: 28, month: 1, day: 1, hour: 0, minute: 0, second: 0, nanosecond: 0)
+        let startComponents = DateComponents(era: 78, year: 28, month: 1, day: 1, hour: 0, minute: 0, second: 0, nanosecond: 0)
         let startDate = cal.date(from: startComponents)!
         
         /* Dates are:
-             2011-05-17 07:00:00 UTC
-             2012-05-05 07:00:00 UTC
-             2013-05-24 07:00:00 UTC
-             2014-05-13 07:00:00 UTC
+         2011-05-17 07:00:00 UTC
+         2012-05-05 07:00:00 UTC
+         2013-05-24 07:00:00 UTC
+         2014-05-13 07:00:00 UTC
          */
         let expectedOffsetsWithoutLeapMonthSet = [327308400, 357894000, 391071600, 421657200].map { Date(timeIntervalSinceReferenceDate: $0) }
         cal.enumerateDates(startingAfter: startDate, matching: birthday, matchingPolicy: .previousTimePreservingSmallerComponents) { result, exactMatch, stop in
@@ -846,16 +887,16 @@ final class CalendarTests : XCTestCase {
             if results.count == expectedOffsetsWithoutLeapMonthSet.count { stop = true }
         }
         XCTAssertEqual(results, expectedOffsetsWithoutLeapMonthSet)
-                
+        
         /** Strict matching **/
         
         birthday.isLeapMonth = true
-
+        
         /* Dates are:
-             2012-06-04 07:00:00 UTC
-             2020-06-06 07:00:00 UTC
-             2058-06-05 07:00:00 UTC
-             2069-06-04 07:00:00 UTC
+         2012-06-04 07:00:00 UTC
+         2020-06-06 07:00:00 UTC
+         2058-06-05 07:00:00 UTC
+         2069-06-04 07:00:00 UTC
          */
         
         results.removeAll()
@@ -865,6 +906,10 @@ final class CalendarTests : XCTestCase {
             if results.count == expectedOffsetsWithLeapMonthSet.count { stop = true }
         }
         XCTAssertEqual(results, expectedOffsetsWithLeapMonthSet)
+        
+        //XCTAssertEqual failed:
+        // ("[2012-06-04 07:00:00 +0000, 2020-06-06 07:00:00 +0000, 2077-06-05 07:00:00 +0000, 2096-06-05 07:00:00 +0000]") is not equal to
+        // ("[2012-06-04 07:00:00 +0000, 2020-06-06 07:00:00 +0000, 2058-06-05 07:00:00 +0000, 2069-06-04 07:00:00 +0000]")
 
         /* Now backwards! */
         /* Dates are:
