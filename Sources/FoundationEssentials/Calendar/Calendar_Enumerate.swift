@@ -459,7 +459,7 @@ extension Calendar {
             exactMatch = true
         }
 
-        // Bump up the next highest unit
+        // Bump up the next highest unit - this is a calculation of where we start the search on the next loop of the iteration
         if let newSearchingDate = bumpedDateUpToNextHigherUnitInComponents(searchingDate, matchingComponents, direction, matchDate) {
             searchingDate = newSearchingDate
         }
@@ -1554,13 +1554,7 @@ extension Calendar {
                 }
                 try verifyAdvancingResult(result, previous: lastResult, direction: direction)
             } while resultMonth != targetMonth || resultIsLeapMonth != targetIsLeapMonth
-        }
-        /* TODO */
-        /*
-        else {
-            // Reset to the beginning of the range, because smaller units may not be set
-            result = resultMonthRange.start
-        }*/
+        } 
 
         return result
     }

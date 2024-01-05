@@ -133,7 +133,7 @@ public struct Calendar : Hashable, Equatable, Sendable {
     }
 
     /// Bitwise set of which components in a `DateComponents` are interesting to use. More efficient than`Set<Component>`.
-    package struct ComponentSet: OptionSet {
+    package struct ComponentSet: OptionSet, CustomDebugStringConvertible {
         package let rawValue: UInt
         package init(rawValue: UInt) { self.rawValue = rawValue }
 
@@ -224,6 +224,10 @@ public struct Calendar : Hashable, Equatable, Sendable {
 
             // The calendar and timeZone properties do not count as a 'highest unit set', since they are not ordered in time like the others are.
             return nil
+        }
+        
+        package var debugDescription: String {
+            self.set.debugDescription
         }
     }
 
