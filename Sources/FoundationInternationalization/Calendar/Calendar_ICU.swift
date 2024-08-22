@@ -10,6 +10,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+internal import Synchronization
+
 #if canImport(FoundationEssentials)
 import FoundationEssentials
 #endif
@@ -37,32 +39,185 @@ private func _calendarICUClass_localized() -> _CalendarProtocol.Type? {
 }
 #endif
 
-internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
-    let lock: LockedState<Void>
+internal final class _CalendarICU: _CalendarProtocol, Sendable {
     let identifier: Calendar.Identifier
+    let lock: Mutex<_CalendarICUInner>
+    
+    init(identifier: Calendar.Identifier, timeZone: TimeZone?, locale: Locale?, firstWeekday: Int?, minimumDaysInFirstWeek: Int?, gregorianStartDate: Date?) {
+        self.identifier = identifier
+        let inner = _CalendarICUInner(identifier: identifier, timeZone: timeZone, locale: locale, firstWeekday: firstWeekday, minimumDaysInFirstWeek: minimumDaysInFirstWeek, gregorianStartDate: gregorianStartDate)
+        lock = Mutex(inner)
+    }
+    
+    var locale: Locale? {
+        get {
+            lock.withLock { $0.locale }
+        }
+        set {
+            lock.withLock { $0.locale = newValue }
+        }
+    }
+    
+    var timeZone: TimeZone {
+        get {
+            lock.withLock { $0.timeZone }
+        }
+        set {
+            lock.withLock { $0.timeZone = newValue }
+        }
+    }
+    
+    var firstWeekday: Int {
+        get {
+            lock.withLock { $0.firstWeekday }
+        }
+        set {
+            lock.withLock { $0.firstWeekday = newValue }
+        }
+    }
+    
+    var minimumDaysInFirstWeek: Int {
+        get {
+            lock.withLock { $0.minimumDaysInFirstWeek }
+        }
+        set {
+            lock.withLock { $0.minimumDaysInFirstWeek = newValue }
+        }
+    }
+    
+    func copy(changingLocale: Locale? = nil,
+              changingTimeZone: TimeZone? = nil,
+              changingFirstWeekday: Int? = nil,
+              changingMinimumDaysInFirstWeek: Int? = nil) -> any _CalendarProtocol {
+        let (newLocale, newTimeZone, newFirstWeekday, newMinDays) = lock.withLock {
+            var newLocale = $0.locale
+            var newTimeZone = $0.timeZone
+            var newFirstWeekday: Int?
+            var newMinDays: Int?
+            
+            if let changingLocale {
+                newLocale = changingLocale
+            }
+            
+            if let changingTimeZone {
+                newTimeZone = changingTimeZone
+            }
+            
+            if let changingFirstWeekday {
+                newFirstWeekday = changingFirstWeekday
+            } else if let firstWeekday = $0.customFirstWeekday {
+                newFirstWeekday = firstWeekday
+            } else {
+                newFirstWeekday = nil
+            }
+            
+            if let changingMinimumDaysInFirstWeek {
+                newMinDays = changingMinimumDaysInFirstWeek
+            } else if let minimumFirstDaysInWeek = $0.customMinimumFirstDaysInWeek {
+                newMinDays = minimumFirstDaysInWeek
+            } else {
+                newMinDays = nil
+            }
+            
+            return (newLocale, newTimeZone, newFirstWeekday, newMinDays)
+        }
+        
+        return _CalendarICU(identifier: identifier, timeZone: newTimeZone, locale: newLocale, firstWeekday: newFirstWeekday, minimumDaysInFirstWeek: newMinDays, gregorianStartDate: nil)
+    }
+    
+    func hash(into hasher: inout Hasher) {
+        lock.withLock {
+            $0.hash(into: &hasher)
+        }
+    }
+    
+    func minimumRange(of component: Calendar.Component) -> Range<Int>? {
+        lock.withLock { $0.minimumRange(of: component) }
+    }
+    
+    func maximumRange(of component: Calendar.Component) -> Range<Int>? {
+        lock.withLock { $0.maximumRange(of: component) }
+    }
+    
+    func range(of smaller: Calendar.Component, in larger: Calendar.Component, for date: Date) -> Range<Int>? {
+        lock.withLock { $0.range(of: smaller, in: larger, for: date) }
+    }
+    
+    func ordinality(of smaller: Calendar.Component, in larger: Calendar.Component, for date: Date) -> Int? {
+        lock.withLock { $0.ordinality(of: smaller, in: larger, for: date)}
+    }
+    
+    func dateInterval(of component: Calendar.Component, for date: Date) -> DateInterval? {
+        lock.withLock { $0.dateInterval(of: component, at: date) }
+    }
+    
+    func isDateInWeekend(_ date: Date) -> Bool {
+        lock.withLock { $0.isDateInWeekend(date) }
+    }
+    
+    func date(from components: DateComponents) -> Date? {
+        if let tz = components.timeZone {
+            let withTz = copy(changingTimeZone: tz)
 
+            // Clear the dc time zone or we'll recurse forever
+            var dc = components
+            dc.timeZone = nil
+            return withTz.date(from: dc)
+        } else {
+            return lock.withLock { $0.date(from: components) }
+        }
+    }
+    
+    func dateComponents(_ components: Calendar.ComponentSet, from date: Date, in timeZone: TimeZone) -> DateComponents {
+        if self.timeZone != timeZone {
+            // Make a copy of ourselves with the new time zone set
+            let withTz = copy(changingTimeZone: timeZone)
+            return withTz.dateComponents(components, from: date)
+        } else {
+            return lock.withLock { $0.dateComponents(components, from: date) }
+        }
+    }
+    
+    func dateComponents(_ components: Calendar.ComponentSet, from date: Date) -> DateComponents {
+        lock.withLock { $0.dateComponents(components, from: date) }
+    }
+    
+    func date(byAdding components: DateComponents, to date: Date, wrappingComponents: Bool) -> Date? {
+        lock.withLock { $0.date(byAdding: components, to: date, wrappingComponents: wrappingComponents) }
+    }
+    
+    func dateComponents(_ components: Calendar.ComponentSet, from start: Date, to end: Date) -> DateComponents {
+        lock.withLock { $0.dateComponents(components, from: start, to: end) }
+    }
+    
+    // for testing only
+    internal func firstInstant(of unit: Calendar.Component, at: Date) -> Date {
+        lock.withLock { $0.firstInstant(of: unit, at: at) }
+    }
+}
+
+struct _CalendarICUInner : ~Copyable {
+    let identifier: Calendar.Identifier
     var ucalendar: UnsafeMutablePointer<UCalendar?>
 
+    var _locale: Locale?
     var _timeZone: TimeZone
 
     // These custom values take precedence over the locale values
-    private var customFirstWeekday: Int?
-    private var customMinimumFirstDaysInWeek: Int?
+    var customFirstWeekday: Int?
+    var customMinimumFirstDaysInWeek: Int?
 
     let customGregorianStartDate: Date?
 
     init(identifier: Calendar.Identifier,
-                  timeZone: TimeZone?,
-                  locale: Locale?,
-                  firstWeekday: Int?,
-                  minimumDaysInFirstWeek: Int?,
-                  gregorianStartDate: Date?)
+         timeZone: TimeZone?,
+         locale: Locale?,
+         firstWeekday: Int?,
+         minimumDaysInFirstWeek: Int?,
+         gregorianStartDate: Date?)
     {
         self.identifier = identifier
-
-        lock = LockedState<Void>()
-
-        self.locale = locale
+        _locale = locale
         _timeZone = timeZone ?? TimeZone.default
 
         customFirstWeekday = firstWeekday
@@ -128,7 +283,7 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
 
     // MARK: -
 
-    func _locked_regenerate() {
+    mutating func regenerate() {
         ucal_close(ucalendar)
         ucalendar = Self.icuCalendar(
             identifier: identifier,
@@ -140,10 +295,12 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
     }
 
     var locale: Locale? {
-        didSet {
-            lock.withLock {
-                _locked_regenerate()
-            }
+        get {
+            _locale
+        }
+        set {
+            _locale = newValue
+            regenerate()
         }
     }
 
@@ -152,29 +309,19 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
             _timeZone
         }
         set {
-            lock.withLock {
-                _timeZone = newValue
-                _locked_regenerate()
-            }
+            _timeZone = newValue
+            regenerate()
         }
     }
 
     var firstWeekday: Int {
         get {
-            lock.withLock {
-                _locked_firstWeekday
-            }
+            customFirstWeekday ?? Int(ucal_getAttribute(ucalendar, UCAL_FIRST_DAY_OF_WEEK))
         }
         set {
-            lock.withLock {
-                customFirstWeekday = newValue
-                ucal_setAttribute(ucalendar, UCAL_FIRST_DAY_OF_WEEK, Int32(newValue))
-            }
+            customFirstWeekday = newValue
+            ucal_setAttribute(ucalendar, UCAL_FIRST_DAY_OF_WEEK, Int32(newValue))
         }
-    }
-
-    private var _locked_firstWeekday: Int {
-        customFirstWeekday ?? Int(ucal_getAttribute(ucalendar, UCAL_FIRST_DAY_OF_WEEK))
     }
     
     var preferredFirstWeekday: Int? {
@@ -187,15 +334,11 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
 
     var minimumDaysInFirstWeek: Int {
         get {
-            lock.withLock {
-                _locked_minimumDaysInFirstWeek
-            }
+            customMinimumFirstDaysInWeek ?? Int(ucal_getAttribute(ucalendar, UCAL_MINIMAL_DAYS_IN_FIRST_WEEK))
         }
         set {
-            lock.withLock {
-                customMinimumFirstDaysInWeek = newValue
-                ucal_setAttribute(ucalendar, UCAL_MINIMAL_DAYS_IN_FIRST_WEEK, Int32(newValue))
-            }
+            customMinimumFirstDaysInWeek = newValue
+            ucal_setAttribute(ucalendar, UCAL_MINIMAL_DAYS_IN_FIRST_WEEK, Int32(newValue))
         }
     }
     
@@ -203,61 +346,17 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
         locale?.prefs?.minDaysInFirstWeek?[identifier]
     }
 
-    private var _locked_minimumDaysInFirstWeek: Int {
-        customMinimumFirstDaysInWeek ?? Int(ucal_getAttribute(ucalendar, UCAL_MINIMAL_DAYS_IN_FIRST_WEEK))
-    }
-
     // MARK: -
 
-    func copy(changingLocale: Locale? = nil,
-              changingTimeZone: TimeZone? = nil,
-              changingFirstWeekday: Int? = nil,
-              changingMinimumDaysInFirstWeek: Int? = nil) -> any _CalendarProtocol {
-        return lock.withLock {
-            var newLocale = self.locale
-            var newTimeZone = self.timeZone
-            var newFirstWeekday: Int?
-            var newMinDays: Int?
-
-            if let changingLocale {
-                newLocale = changingLocale
-            }
-
-            if let changingTimeZone {
-                newTimeZone = changingTimeZone
-            }
-
-            if let changingFirstWeekday {
-                newFirstWeekday = changingFirstWeekday
-            } else if let customFirstWeekday {
-                newFirstWeekday = customFirstWeekday
-            } else {
-                newFirstWeekday = nil
-            }
-
-            if let changingMinimumDaysInFirstWeek {
-                newMinDays = changingMinimumDaysInFirstWeek
-            } else if let customMinimumFirstDaysInWeek {
-                newMinDays = customMinimumFirstDaysInWeek
-            } else {
-                newMinDays = nil
-            }
-
-            return _CalendarICU(identifier: identifier, timeZone: newTimeZone, locale: newLocale, firstWeekday: newFirstWeekday, minimumDaysInFirstWeek: newMinDays, gregorianStartDate: nil)
-        }
-    }
-
     func hash(into hasher: inout Hasher) {
-        lock.lock()
         hasher.combine(identifier)
         hasher.combine(timeZone)
-        hasher.combine(_locked_firstWeekday)
-        hasher.combine(_locked_minimumDaysInFirstWeek)
-        hasher.combine(localeIdentifier)
+        hasher.combine(firstWeekday)
+        hasher.combine(minimumDaysInFirstWeek)
+        hasher.combine(locale?.identifier ?? "")
         // It's important to include only properties that affect the Calendar itself. That allows e.g. currentLocale (with an irrelevant pref about something like preferred metric unit) to compare equal to a different locale.
         hasher.combine(preferredFirstWeekday)
         hasher.combine(preferredMinimumDaysInFirstweek)
-        lock.unlock()
     }
     
 #if FOUNDATION_FRAMEWORK
@@ -301,29 +400,21 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
             return nil
         }
 
-        return lock.withLock {
-            var status = U_ZERO_ERROR
-            let min = ucal_getLimit(ucalendar, fields, UCAL_GREATEST_MINIMUM, &status)
-            guard status.isSuccess else { return nil }
-            let max = ucal_getLimit(ucalendar, fields, UCAL_LEAST_MAXIMUM, &status)
-            guard status.isSuccess else { return nil }
-
-            // We add 1 to the values for month due to a difference in opinion about what 0 means
-            if component == .month {
-                return Int(min + 1)..<Int(max + 2)
-            } else {
-                return Int(min)..<Int(max + 1)
-            }
+        var status = U_ZERO_ERROR
+        let min = ucal_getLimit(ucalendar, fields, UCAL_GREATEST_MINIMUM, &status)
+        guard status.isSuccess else { return nil }
+        let max = ucal_getLimit(ucalendar, fields, UCAL_LEAST_MAXIMUM, &status)
+        guard status.isSuccess else { return nil }
+        
+        // We add 1 to the values for month due to a difference in opinion about what 0 means
+        if component == .month {
+            return Int(min + 1)..<Int(max + 2)
+        } else {
+            return Int(min)..<Int(max + 1)
         }
     }
 
     func maximumRange(of component: Calendar.Component) -> Range<Int>? {
-        return lock.withLock {
-            return _locked_maximumRange(of: component)
-        }
-    }
-
-    private func _locked_maximumRange(of component: Calendar.Component) -> Range<Int>? {
         if let easy = easyMinMaxRange(of: component) {
             return easy
         }
@@ -346,16 +437,16 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
         }
     }
 
-    private func _locked_algorithmA(smaller: Calendar.Component, larger: Calendar.Component, at: Date) -> Range<Int>? {
-        guard let interval = _locked_dateInterval(of: larger, at: at) else {
+    private func algorithmA(smaller: Calendar.Component, larger: Calendar.Component, at: Date) -> Range<Int>? {
+        guard let interval = dateInterval(of: larger, at: at) else {
             return nil
         }
 
-        guard let ord1 = _locked_ordinality(of: smaller, in: larger, for: interval.start + 0.1) else {
+        guard let ord1 = ordinality(of: smaller, in: larger, for: interval.start + 0.1) else {
             return nil
         }
 
-        guard let ord2 = _locked_ordinality(of: smaller, in: larger, for: interval.start + interval.duration - 0.1) else {
+        guard let ord2 = ordinality(of: smaller, in: larger, for: interval.start + interval.duration - 0.1) else {
             return nil
         }
 
@@ -367,8 +458,8 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
         return ord1..<(ord2 + 1)
     }
 
-    private func _locked_algorithmB(smaller: Calendar.Component, larger: Calendar.Component, at: Date) -> Range<Int>? {
-        guard let interval = _locked_dateInterval(of: larger, at: at) else {
+    private func algorithmB(smaller: Calendar.Component, larger: Calendar.Component, at: Date) -> Range<Int>? {
+        guard let interval = dateInterval(of: larger, at: at) else {
             return nil
         }
 
@@ -378,15 +469,15 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
 
         var result: Range<Int>?
         repeat {
-            guard let innerInterval = _locked_dateInterval(of: .month, at: current) else {
+            guard let innerInterval = dateInterval(of: .month, at: current) else {
                 return result
             }
 
-            guard let ord1 = _locked_ordinality(of: smaller, in: .month, for: innerInterval.start + 0.1) else {
+            guard let ord1 = ordinality(of: smaller, in: .month, for: innerInterval.start + 0.1) else {
                 return result
             }
 
-            guard let ord2 = _locked_ordinality(of: smaller, in: .month, for: innerInterval.start + innerInterval.duration - 0.1) else {
+            guard let ord2 = ordinality(of: smaller, in: .month, for: innerInterval.start + innerInterval.duration - 0.1) else {
                 return result
             }
 
@@ -407,16 +498,16 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
         return result
     }
 
-    private func _locked_algorithmC(smaller: Calendar.Component, larger: Calendar.Component, at: Date) -> Range<Int>? {
-        guard let interval = _locked_dateInterval(of: larger, at: at) else {
+    private func algorithmC(smaller: Calendar.Component, larger: Calendar.Component, at: Date) -> Range<Int>? {
+        guard let interval = dateInterval(of: larger, at: at) else {
             return nil
         }
 
-        guard let ord1 = _locked_ordinality(of: smaller, in: .year, for: interval.start + 0.1) else {
+        guard let ord1 = ordinality(of: smaller, in: .year, for: interval.start + 0.1) else {
             return nil
         }
 
-        guard let ord2 = _locked_ordinality(of: smaller, in: .year, for: interval.start + interval.duration - 0.1) else {
+        guard let ord2 = ordinality(of: smaller, in: .year, for: interval.start + interval.duration - 0.1) else {
             return nil
         }
 
@@ -428,23 +519,23 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
         return ord1..<(ord2 + 1)
     }
 
-    private func _locked_algorithmD(at: Date) -> Range<Int>? {
-        guard let weekInterval = _locked_dateInterval(of: .weekOfMonth, at: at) else {
+    private func algorithmD(at: Date) -> Range<Int>? {
+        guard let weekInterval = dateInterval(of: .weekOfMonth, at: at) else {
             return nil
         }
 
-        guard let monthInterval = _locked_dateInterval(of: .month, at: at) else {
+        guard let monthInterval = dateInterval(of: .month, at: at) else {
             return nil
         }
 
         let start = weekInterval.start < monthInterval.start ? monthInterval.start : weekInterval.start
         let end = weekInterval.end < monthInterval.end ? weekInterval.end : monthInterval.end
 
-        guard let ord1 = _locked_ordinality(of: .day, in: .month, for: start + 0.1) else {
+        guard let ord1 = ordinality(of: .day, in: .month, for: start + 0.1) else {
             return nil
         }
 
-        guard let ord2 = _locked_ordinality(of: .day, in: .month, for: end - 0.1) else {
+        guard let ord2 = ordinality(of: .day, in: .month, for: end - 0.1) else {
             return nil
         }
 
@@ -457,12 +548,6 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
     }
 
     func range(of smaller: Calendar.Component, in larger: Calendar.Component, for date: Date) -> Range<Int>? {
-        return lock.withLock {
-            return _locked_range(of: smaller, in: larger, for: date)
-        }
-    }
-
-    func _locked_range(of smaller: Calendar.Component, in larger: Calendar.Component, for date: Date) -> Range<Int>? {
         let capped = date.capped
 
         if larger == .calendar || larger == .timeZone || larger == .weekdayOrdinal || larger == .nanosecond {
@@ -475,31 +560,31 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
             case .second, .minute, .hour, .day, .weekday:
                 return nil
             default:
-                return _locked_maximumRange(of: smaller)
+                return maximumRange(of: smaller)
             }
         case .hour:
             switch larger {
             case .second, .minute, .hour:
                 return nil
             default:
-                return _locked_maximumRange(of: smaller)
+                return maximumRange(of: smaller)
             }
         case .minute:
             switch larger {
             case .second, .minute:
                 return nil
             default:
-                return _locked_maximumRange(of: smaller)
+                return maximumRange(of: smaller)
             }
         case .second:
             switch larger {
             case .second:
                 return nil
             default:
-                return _locked_maximumRange(of: smaller)
+                return maximumRange(of: smaller)
             }
         case .nanosecond:
-            return _locked_maximumRange(of: smaller)
+            return maximumRange(of: smaller)
         default:
             break // Continue search
         }
@@ -509,9 +594,9 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
             // assume it cycles through every possible combination in an era at least once; this is a little dodgy for the Japanese calendar but this calculation isn't terribly useful either
             switch smaller {
             case .year, .quarter, .month, .weekOfYear, .weekOfMonth, .day: /* kCFCalendarUnitWeek_Deprecated */
-                return _locked_maximumRange(of: smaller)
+                return maximumRange(of: smaller)
             case .weekdayOrdinal:
-                guard let r = _locked_maximumRange(of: .day) else { return nil }
+                guard let r = maximumRange(of: .day) else { return nil }
                 return 1..<(((r.lowerBound + (r.upperBound - r.lowerBound) - 1 + 6) / 7) + 1)
             default:
                 break
@@ -519,38 +604,38 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
         case .year:
             switch smaller {
             case .quarter, .month, .weekOfYear, .dayOfYear: /* deprecated week */
-                return _locked_algorithmA(smaller: smaller, larger: larger, at: capped)
+                return algorithmA(smaller: smaller, larger: larger, at: capped)
             case .weekOfMonth, .day, .weekdayOrdinal:
-                return _locked_algorithmB(smaller: smaller, larger: larger, at: capped)
+                return algorithmB(smaller: smaller, larger: larger, at: capped)
             default:
                 break
             }
         case .yearForWeekOfYear:
             switch smaller {
             case .quarter, .month, .weekOfYear: /* deprecated week */
-                return _locked_algorithmA(smaller: smaller, larger: larger, at: capped)
+                return algorithmA(smaller: smaller, larger: larger, at: capped)
             case .weekOfMonth:
                 break
             case .day, .weekdayOrdinal:
-                return _locked_algorithmB(smaller: smaller, larger: larger, at: capped)
+                return algorithmB(smaller: smaller, larger: larger, at: capped)
             default:
                 break
             }
         case .quarter:
             switch smaller {
             case .month, .weekOfYear: /* deprecated week */
-                return _locked_algorithmC(smaller: smaller, larger: larger, at: capped)
+                return algorithmC(smaller: smaller, larger: larger, at: capped)
             case .weekOfMonth, .day, .weekdayOrdinal:
-                return _locked_algorithmB(smaller: smaller, larger: larger, at: capped)
+                return algorithmB(smaller: smaller, larger: larger, at: capped)
             default:
                 break
             }
         case .month:
             switch smaller {
             case .weekOfYear: /* deprecated week */
-                return _locked_algorithmC(smaller: smaller, larger: larger, at: capped)
+                return algorithmC(smaller: smaller, larger: larger, at: capped)
             case .weekOfMonth, .day, .weekdayOrdinal:
-                return _locked_algorithmA(smaller: smaller, larger: larger, at: capped)
+                return algorithmA(smaller: smaller, larger: larger, at: capped)
             default:
                 break
             }
@@ -559,7 +644,7 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
         case .weekOfMonth: /* deprecated week */
             switch smaller {
             case .day:
-                return _locked_algorithmD(at: capped)
+                return algorithmD(at: capped)
             default:
                 break
             }
@@ -571,12 +656,6 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
     }
 
     func ordinality(of smaller: Calendar.Component, in larger: Calendar.Component, for date: Date) -> Int? {
-        lock.withLock {
-            _locked_ordinality(of: smaller, in: larger, for: date)
-        }
-    }
-
-    func _locked_ordinality(of smaller: Calendar.Component, in larger: Calendar.Component, for date: Date) -> Int? {
         // The recursion in this function assumes the order of the unit is dependent upon the order of the higher unit before it.  For example, the ordinality of the week of the month is dependent upon the ordinality of the month in which it lies, and that month is dependent upon the ordinality of the year in which it lies, etc.
 
         switch larger {
@@ -593,18 +672,18 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
                 ucal_setMillis(ucalendar, date.udateInSeconds, &status)
                 return Int(ucal_get(ucalendar, UCAL_YEAR_WOY, &status))
             case .quarter:
-                guard let year = _locked_ordinality(of: .year, in: .era, for: date) else { return nil }
-                guard let q = _locked_ordinality(of: .quarter, in: .year, for: date) else { return nil }
+                guard let year = ordinality(of: .year, in: .era, for: date) else { return nil }
+                guard let q = ordinality(of: .quarter, in: .year, for: date) else { return nil }
                 let quarter = 4 * (year - 1) + q
                 return quarter
             case .month:
-                guard let start = _locked_start(of: .era, at: date) else { return nil }
+                guard let start = start(of: .era, at: date) else { return nil }
                 let dateUDate = date.udateInSeconds
                 let startUDate = start.udateInSeconds
                 var testUDate: UDate
 
                 var month = 0
-                if let r = _locked_maximumRange(of: .day) {
+                if let r = maximumRange(of: .day) {
                     month = Int(floor(
                         (date.timeIntervalSinceReferenceDate - start.timeIntervalSinceReferenceDate) /
                         86400.0 /
@@ -620,28 +699,28 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
                         var status = U_ZERO_ERROR
                         ucal_clear(ucalendar)
                         ucal_setMillis(ucalendar, startUDate, &status)
-                        testUDate = _locked_add(UCAL_MONTH, amount: month, wrap: false, status: &status)
+                        testUDate = add(UCAL_MONTH, amount: month, wrap: false, status: &status)
                     } while testUDate <= dateUDate
                 }
                 return month
 
             case .weekOfYear, .weekOfMonth: /* kCFCalendarUnitWeek_Deprecated */
                 // Do not use this combo for recursion
-                guard let start = _locked_start(of: .era, at: date) else { return nil }
+                guard let start = start(of: .era, at: date) else { return nil }
                 let dateUDate = date.udateInSeconds
                 var startUDate = start.udateInSeconds
                 var testUDate: UDate
 
                 var daysAdded = 0
                 var status = U_ZERO_ERROR
-                while ucal_get(ucalendar, UCAL_DAY_OF_WEEK, &status) != _locked_firstWeekday {
+                while ucal_get(ucalendar, UCAL_DAY_OF_WEEK, &status) != firstWeekday {
                     // Mutate the calendar but don't use the result here
-                    _ = _locked_add(UCAL_DAY_OF_MONTH, amount: 1, wrap: false, status: &status)
+                    _ = add(UCAL_DAY_OF_MONTH, amount: 1, wrap: false, status: &status)
                     daysAdded += 1
                 }
 
                 startUDate += Double(daysAdded) * 86400.0 * 1000.0
-                if _locked_minimumDaysInFirstWeek <= daysAdded {
+                if minimumDaysInFirstWeek <= daysAdded {
                     // previous week chunk was big enough, count it
                     startUDate -= 7 * 86400.0 * 1000.0
                 }
@@ -657,13 +736,13 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
                     week += 1
                     ucal_clear(ucalendar)
                     ucal_setMillis(ucalendar, startUDate, &status)
-                    testUDate = _locked_add(UCAL_WEEK_OF_YEAR, amount: week, wrap: false, status: &status)
+                    testUDate = add(UCAL_WEEK_OF_YEAR, amount: week, wrap: false, status: &status)
                 } while testUDate <= dateUDate
 
                 return week
             case .weekdayOrdinal, .weekday:
                 // Do not use this combo for recursion
-                guard let start = _locked_start(of: .era, at: date) else { return nil }
+                guard let start = start(of: .era, at: date) else { return nil }
                 let dateUDate = date.udateInSeconds
                 var startUDate = start.udateInSeconds
                 var testUDate: UDate
@@ -676,7 +755,7 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
                 ucal_setMillis(ucalendar, startUDate, &status)
                 // move start forward to target day of week if not already there
                 while ucal_get(ucalendar, UCAL_DAY_OF_WEEK, &status) != targetDoW {
-                    _ = _locked_add(UCAL_DAY_OF_MONTH, amount: 1, wrap: false, status: &status)
+                    _ = add(UCAL_DAY_OF_MONTH, amount: 1, wrap: false, status: &status)
                     startUDate += 86400.0 * 1000.0
                 }
 
@@ -694,12 +773,12 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
                     status = U_ZERO_ERROR
                     ucal_clear(ucalendar)
                     ucal_setMillis(ucalendar, startUDate, &status)
-                    testUDate = _locked_add(UCAL_WEEK_OF_YEAR, amount: nthWeekday, wrap: false, status: &status)
+                    testUDate = add(UCAL_WEEK_OF_YEAR, amount: nthWeekday, wrap: false, status: &status)
                 } while testUDate < dateUDate
 
                 return nthWeekday
             case .day:
-                let start = _locked_start(of: .era, at: date)
+                let start = start(of: .era, at: date)
                 // Must do this to make sure things are set up for recursive calls to ordinality(of...)
                 var status = U_ZERO_ERROR
                 ucal_clear(ucalendar)
@@ -711,19 +790,19 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
                 )) + 1
                 return day
             case .hour:
-                guard let day = _locked_ordinality(of: .day, in: .era, for: date) else { return nil }
+                guard let day = ordinality(of: .day, in: .era, for: date) else { return nil }
                 if (Int.max - 24) / 24 < (day - 1) { return nil }
                 var status = U_ZERO_ERROR
                 let hour = (day - 1) * 24 + Int(ucal_get(ucalendar, UCAL_HOUR_OF_DAY, &status)) + 1
                 return hour
             case .minute:
-                guard let hour = _locked_ordinality(of: .hour, in: .era, for: date) else { return nil }
+                guard let hour = ordinality(of: .hour, in: .era, for: date) else { return nil }
                 if (Int.max - 60) / 60 < (hour - 1) { return nil }
                 var status = U_ZERO_ERROR
                 let minute = (hour - 1) * 60 + Int(ucal_get(ucalendar, UCAL_MINUTE, &status)) + 1
                 return minute
             case .second:
-                guard let minute = _locked_ordinality(of: .minute, in: .era, for: date) else { return nil }
+                guard let minute = ordinality(of: .minute, in: .era, for: date) else { return nil }
                 if (Int.max - 60) / 60 < (minute - 1) { return nil }
                 var status = U_ZERO_ERROR
                 let second = (minute - 1) * 60 + Int(ucal_get(ucalendar, UCAL_SECOND, &status)) + 1
@@ -759,8 +838,8 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
                 let doy = Int(ucal_get(ucalendar, UCAL_DAY_OF_YEAR, &status))
                 ucal_set(ucalendar, UCAL_DAY_OF_YEAR, 1)
                 let fdDoW = Int(ucal_get(ucalendar, UCAL_DAY_OF_WEEK, &status))
-                let ucalFirstWeekday = _locked_firstWeekday
-                let ucalMinDaysInFirstWeek = _locked_minimumDaysInFirstWeek
+                let ucalFirstWeekday = firstWeekday
+                let ucalMinDaysInFirstWeek = minimumDaysInFirstWeek
                 let week = (doy + 7 - ucalMinDaysInFirstWeek + (fdDoW + ucalMinDaysInFirstWeek - ucalFirstWeekday + 6) % 7) / 7
                 status = U_ZERO_ERROR
                 ucal_clear(ucalendar)
@@ -768,10 +847,10 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
                 return week
             case .weekdayOrdinal, .weekday:
                 // Do not use this combo for recursion
-                guard let start = _locked_start(of: .year, at: date) else { return nil }
+                guard let start = start(of: .year, at: date) else { return nil }
                 var status = U_ZERO_ERROR
 
-                guard let dateWeek = _locked_ordinality(of: .weekOfYear, in: .year, for: date) else { return nil }
+                guard let dateWeek = ordinality(of: .weekOfYear, in: .year, for: date) else { return nil }
                 let targetDoW = ucal_get(ucalendar, UCAL_DAY_OF_WEEK, &status)
 
                 status = U_ZERO_ERROR
@@ -780,11 +859,11 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
                 ucal_setMillis(ucalendar, udate, &status)
                 // move start forward to target day of week if not already there
                 while ucal_get(ucalendar, UCAL_DAY_OF_WEEK, &status) != targetDoW {
-                    udate = _locked_add(UCAL_DAY_OF_MONTH, amount: 1, wrap: false, status: &status)
+                    udate = add(UCAL_DAY_OF_MONTH, amount: 1, wrap: false, status: &status)
                 }
 
                 let newStart = Date(udate: udate)
-                guard let startWeek = _locked_ordinality(of: .weekOfYear, in: .year, for: newStart) else { return nil }
+                guard let startWeek = ordinality(of: .weekOfYear, in: .year, for: newStart) else { return nil }
                 let nthWeekday = dateWeek - startWeek + 1
                 return nthWeekday
             case .day, .dayOfYear:
@@ -795,21 +874,21 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
                 return day
             case .hour:
                 var status = U_ZERO_ERROR
-                guard let day = _locked_ordinality(of: .day, in: .year, for: date) else { return nil }
+                guard let day = ordinality(of: .day, in: .year, for: date) else { return nil }
                 let hour = (day - 1) * 24 + Int(ucal_get(ucalendar, UCAL_HOUR_OF_DAY, &status)) + 1
                 return hour
             case .minute:
                 var status = U_ZERO_ERROR
-                guard let hour = _locked_ordinality(of: .hour, in: .year, for: date) else { return nil }
+                guard let hour = ordinality(of: .hour, in: .year, for: date) else { return nil }
                 let minute = (hour - 1) * 60 + Int(ucal_get(ucalendar, UCAL_MINUTE, &status)) + 1
                 return minute
             case .second:
                 var status = U_ZERO_ERROR
-                guard let minute = _locked_ordinality(of: .minute, in: .year, for: date) else { return nil }
+                guard let minute = ordinality(of: .minute, in: .year, for: date) else { return nil }
                 let second = (minute - 1) * 60 + Int(ucal_get(ucalendar, UCAL_SECOND, &status)) + 1
                 return second
             case .nanosecond:
-                guard let second = _locked_ordinality(of: .second, in: .year, for: date) else { return nil }
+                guard let second = ordinality(of: .second, in: .year, for: date) else { return nil }
                 let dseconds = (Double(second) - 1.0) + (date.timeIntervalSinceReferenceDate - floor(date.timeIntervalSinceReferenceDate))
                 return Int(dseconds * 1.0e9) + 1
 
@@ -833,9 +912,9 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
                 return week
             case .weekdayOrdinal, .weekday:
                 // Do not use this combo for recursion
-                guard let start = _locked_start(of: .yearForWeekOfYear, at: date) else { return nil }
+                guard let start = start(of: .yearForWeekOfYear, at: date) else { return nil }
                 var status = U_ZERO_ERROR
-                let dateWeek = _locked_ordinality(of: .weekOfYear, in: .yearForWeekOfYear, for: date)
+                let dateWeek = ordinality(of: .weekOfYear, in: .yearForWeekOfYear, for: date)
                 let targetDoW = ucal_get(ucalendar, UCAL_DAY_OF_WEEK, &status)
                 guard let dateWeek else { return nil }
 
@@ -845,32 +924,32 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
                 ucal_setMillis(ucalendar, udate, &status)
                 // move start forward to target day of week if not already there
                 while ucal_get(ucalendar, UCAL_DAY_OF_WEEK, &status) != targetDoW {
-                    udate = _locked_add(UCAL_DAY_OF_MONTH, amount: 1, wrap: false, status: &status)
+                    udate = add(UCAL_DAY_OF_MONTH, amount: 1, wrap: false, status: &status)
                 }
-                guard let startWeek = _locked_ordinality(of: .weekOfYear, in: .yearForWeekOfYear, for: Date(udate: udate)) else { return nil }
+                guard let startWeek = ordinality(of: .weekOfYear, in: .yearForWeekOfYear, for: Date(udate: udate)) else { return nil }
                 let nthWeekday = dateWeek - startWeek + 1
                 return nthWeekday
             case .day:
-                guard let start = _locked_start(of: .yearForWeekOfYear, at: date) else { return nil }
+                guard let start = start(of: .yearForWeekOfYear, at: date) else { return nil }
                 let day = Int(floor((date.timeIntervalSinceReferenceDate - start.timeIntervalSinceReferenceDate) / 86400.0)) + 1
                 return day
             case .hour:
                 var status = U_ZERO_ERROR
-                guard let day = _locked_ordinality(of: .day, in: .yearForWeekOfYear, for: date) else { return nil }
+                guard let day = ordinality(of: .day, in: .yearForWeekOfYear, for: date) else { return nil }
                 let hour = (day - 1) * 24 + Int(ucal_get(ucalendar, UCAL_HOUR_OF_DAY, &status)) + 1
                 return hour
             case .minute:
                 var status = U_ZERO_ERROR
-                guard let hour = _locked_ordinality(of: .hour, in: .yearForWeekOfYear, for: date) else { return nil }
+                guard let hour = ordinality(of: .hour, in: .yearForWeekOfYear, for: date) else { return nil }
                 let minute = (hour - 1) * 60 + Int(ucal_get(ucalendar, UCAL_MINUTE, &status)) + 1
                 return minute
             case .second:
                 var status = U_ZERO_ERROR
-                guard let minute = _locked_ordinality(of: .minute, in: .yearForWeekOfYear, for: date) else { return nil }
+                guard let minute = ordinality(of: .minute, in: .yearForWeekOfYear, for: date) else { return nil }
                 let second = (minute - 1) * 60 + Int(ucal_get(ucalendar, UCAL_SECOND, &status)) + 1
                 return second
             case .nanosecond:
-                guard let second = _locked_ordinality(of: .second, in: .yearForWeekOfYear, for: date) else { return nil }
+                guard let second = ordinality(of: .second, in: .yearForWeekOfYear, for: date) else { return nil }
                 let dseconds = (Double(second) - 1.0) + (date.timeIntervalSinceReferenceDate - floor(date.timeIntervalSinceReferenceDate))
                 return Int(dseconds * 1.0e9) + 1
 
@@ -894,30 +973,30 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
                 }
             case .weekOfYear, .weekOfMonth: /* kCFCalendarUnitWeek_Deprecated */
                 // Do not use this combo for recursion
-                guard let start = _locked_start(of: .quarter, at: date) else { return nil }
+                guard let start = start(of: .quarter, at: date) else { return nil }
                 var status = U_ZERO_ERROR
                 ucal_clear(ucalendar)
                 var udate = start.udateInSeconds
                 ucal_setMillis(ucalendar, udate, &status)
                 // move start forward to first day of week if not already there
                 var daysAdded = 0
-                while ucal_get(ucalendar, UCAL_DAY_OF_WEEK, &status) != _locked_firstWeekday {
-                    udate = _locked_add(UCAL_DAY_OF_MONTH, amount: 1, wrap: false, status: &status)
+                while ucal_get(ucalendar, UCAL_DAY_OF_WEEK, &status) != firstWeekday {
+                    udate = add(UCAL_DAY_OF_MONTH, amount: 1, wrap: false, status: &status)
                     daysAdded += 1
                 }
-                guard var startWeek = _locked_ordinality(of: .weekOfYear, in: .year, for: Date(udate: udate)) else { return nil }
-                if _locked_minimumDaysInFirstWeek <= daysAdded {
+                guard var startWeek = ordinality(of: .weekOfYear, in: .year, for: Date(udate: udate)) else { return nil }
+                if minimumDaysInFirstWeek <= daysAdded {
                     // previous week chunk was big enough, back up
                     startWeek -= 1
                 }
-                guard let dateWeek = _locked_ordinality(of: .weekOfYear, in: .year, for: date) else { return nil }
+                guard let dateWeek = ordinality(of: .weekOfYear, in: .year, for: date) else { return nil }
                 let week = dateWeek - startWeek + 1
                 return week
             case .weekdayOrdinal, .weekday:
                 // Do not use this combo for recursion
-                guard let start = _locked_start(of: .quarter, at: date) else { return nil }
+                guard let start = start(of: .quarter, at: date) else { return nil }
                 var status = U_ZERO_ERROR
-                let dateWeek = _locked_ordinality(of: .weekOfYear, in: .year, for: date)
+                let dateWeek = ordinality(of: .weekOfYear, in: .year, for: date)
                 let targetDoW = ucal_get(ucalendar, UCAL_DAY_OF_WEEK, &status)
                 guard let dateWeek else { return nil }
 
@@ -927,13 +1006,13 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
                 ucal_setMillis(ucalendar, udate, &status)
                 // move start forward to target day of week if not already there
                 while ucal_get(ucalendar, UCAL_DAY_OF_WEEK, &status) != targetDoW {
-                    udate = _locked_add(UCAL_DAY_OF_MONTH, amount: 1, wrap: false, status: &status)
+                    udate = add(UCAL_DAY_OF_MONTH, amount: 1, wrap: false, status: &status)
                 }
-                guard let startWeek = _locked_ordinality(of: .weekOfYear, in: .year, for: Date(udate: udate)) else { return nil }
+                guard let startWeek = ordinality(of: .weekOfYear, in: .year, for: Date(udate: udate)) else { return nil }
                 let nthWeekday = dateWeek - startWeek + 1
                 return nthWeekday
             case .day:
-                let start = _locked_start(of: .quarter, at: date)
+                let start = start(of: .quarter, at: date)
                 // must do this before returning to make sure things are set up for recursive calls to ordinality(of:...)
                 var status = U_ZERO_ERROR
                 ucal_clear(ucalendar)
@@ -943,21 +1022,21 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
                 return day
             case .hour:
                 var status = U_ZERO_ERROR
-                guard let day = _locked_ordinality(of: .day, in: .quarter, for: date) else { return nil }
+                guard let day = ordinality(of: .day, in: .quarter, for: date) else { return nil }
                 let hour = (day - 1) * 24 + Int(ucal_get(ucalendar, UCAL_HOUR_OF_DAY, &status)) + 1
                 return hour
             case .minute:
                 var status = U_ZERO_ERROR
-                guard let hour = _locked_ordinality(of: .hour, in: .quarter, for: date) else { return nil }
+                guard let hour = ordinality(of: .hour, in: .quarter, for: date) else { return nil }
                 let minute = (hour - 1) * 60 + Int(ucal_get(ucalendar, UCAL_MINUTE, &status)) + 1
                 return minute
             case .second:
                 var status = U_ZERO_ERROR
-                guard let minute = _locked_ordinality(of: .minute, in: .quarter, for: date) else { return nil }
+                guard let minute = ordinality(of: .minute, in: .quarter, for: date) else { return nil }
                 let second = (minute - 1) * 60 + Int(ucal_get(ucalendar, UCAL_SECOND, &status)) + 1
                 return second
             case .nanosecond:
-                guard let second = _locked_ordinality(of: .second, in: .quarter, for: date) else { return nil }
+                guard let second = ordinality(of: .second, in: .quarter, for: date) else { return nil }
                 let dseconds = (Double(second) - 1.0) + (date.timeIntervalSinceReferenceDate - floor(date.timeIntervalSinceReferenceDate))
                 return Int(dseconds * 1.0e9) + 1
 
@@ -981,26 +1060,26 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
                 let day = Int(ucal_get(ucalendar, UCAL_DAY_OF_MONTH, &status))
                 return day
             case .weekdayOrdinal, .weekday:
-                guard let day = _locked_ordinality(of: .day, in: .month, for: date) else { return nil }
+                guard let day = ordinality(of: .day, in: .month, for: date) else { return nil }
                 let nthWeekday = (day + 6) / 7
                 return nthWeekday
             case .hour:
                 var status = U_ZERO_ERROR
-                guard let day = _locked_ordinality(of: .day, in: .month, for: date) else { return nil }
+                guard let day = ordinality(of: .day, in: .month, for: date) else { return nil }
                 let hour = (day - 1) * 24 + Int(ucal_get(ucalendar, UCAL_HOUR_OF_DAY, &status)) + 1
                 return hour
             case .minute:
                 var status = U_ZERO_ERROR
-                guard let hour = _locked_ordinality(of: .hour, in: .month, for: date) else { return nil }
+                guard let hour = ordinality(of: .hour, in: .month, for: date) else { return nil }
                 let minute = (hour - 1) * 60 + Int(ucal_get(ucalendar, UCAL_MINUTE, &status)) + 1
                 return minute
             case .second:
                 var status = U_ZERO_ERROR
-                guard let minute = _locked_ordinality(of: .minute, in: .month, for: date) else { return nil }
+                guard let minute = ordinality(of: .minute, in: .month, for: date) else { return nil }
                 let second = (minute - 1) * 60 + Int(ucal_get(ucalendar, UCAL_SECOND, &status)) + 1
                 return second
             case .nanosecond:
-                guard let second = _locked_ordinality(of: .second, in: .month, for: date) else { return nil }
+                guard let second = ordinality(of: .second, in: .month, for: date) else { return nil }
                 let dseconds = (Double(second) - 1.0) + (date.timeIntervalSinceReferenceDate - floor(date.timeIntervalSinceReferenceDate))
                 return Int(dseconds * 1.0e9) + 1
 
@@ -1013,7 +1092,7 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
                 var status = U_ZERO_ERROR
                 ucal_clear(ucalendar)
                 ucal_setMillis(ucalendar, date.udateInSeconds, &status)
-                let day = Int(ucal_get(ucalendar, UCAL_DAY_OF_WEEK, &status)) + 1 - _locked_firstWeekday
+                let day = Int(ucal_get(ucalendar, UCAL_DAY_OF_WEEK, &status)) + 1 - firstWeekday
                 if day <= 0 {
                     return day + 7
                 } else {
@@ -1021,21 +1100,21 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
                 }
             case .hour:
                 var status = U_ZERO_ERROR
-                guard let day = _locked_ordinality(of: .day, in: .weekOfYear, for: date) else { return nil }
+                guard let day = ordinality(of: .day, in: .weekOfYear, for: date) else { return nil }
                 let hour = (day - 1) * 24 + Int(ucal_get(ucalendar, UCAL_HOUR_OF_DAY, &status)) + 1
                 return hour
             case .minute:
                 var status = U_ZERO_ERROR
-                guard let hour = _locked_ordinality(of: .hour, in: .weekOfYear, for: date) else { return nil }
+                guard let hour = ordinality(of: .hour, in: .weekOfYear, for: date) else { return nil }
                 let minute = (hour - 1) * 60 + Int(ucal_get(ucalendar, UCAL_MINUTE, &status)) + 1
                 return minute
             case .second:
                 var status = U_ZERO_ERROR
-                guard let minute = _locked_ordinality(of: .minute, in: .weekOfYear, for: date) else { return nil }
+                guard let minute = ordinality(of: .minute, in: .weekOfYear, for: date) else { return nil }
                 let second = (minute - 1) * 60 + Int(ucal_get(ucalendar, UCAL_SECOND, &status)) + 1
                 return second
             case .nanosecond:
-                guard let second = _locked_ordinality(of: .second, in: .weekOfYear, for: date) else { return nil }
+                guard let second = ordinality(of: .second, in: .weekOfYear, for: date) else { return nil }
                 let dseconds = (Double(second) - 1.0) + (date.timeIntervalSinceReferenceDate - floor(date.timeIntervalSinceReferenceDate))
                 return Int(dseconds * 1.0e9) + 1
 
@@ -1052,16 +1131,16 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
                 return hour
             case .minute:
                 var status = U_ZERO_ERROR
-                guard let hour = _locked_ordinality(of: .hour, in: .day, for: date) else { return nil }
+                guard let hour = ordinality(of: .hour, in: .day, for: date) else { return nil }
                 let minute = (hour - 1) * 60 + Int(ucal_get(ucalendar, UCAL_MINUTE, &status)) + 1
                 return minute
             case .second:
                 var status = U_ZERO_ERROR
-                guard let minute = _locked_ordinality(of: .minute, in: .day, for: date) else { return nil }
+                guard let minute = ordinality(of: .minute, in: .day, for: date) else { return nil }
                 let second = (minute - 1) * 60 + Int(ucal_get(ucalendar, UCAL_SECOND, &status)) + 1
                 return second
             case .nanosecond:
-                guard let second = _locked_ordinality(of: .second, in: .day, for: date) else { return nil }
+                guard let second = ordinality(of: .second, in: .day, for: date) else { return nil }
                 let dseconds = (Double(second) - 1.0) + (date.timeIntervalSinceReferenceDate - floor(date.timeIntervalSinceReferenceDate))
                 return Int(dseconds * 1.0e9) + 1
 
@@ -1078,11 +1157,11 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
                 return minute
             case .second:
                 var status = U_ZERO_ERROR
-                guard let minute = _locked_ordinality(of: .minute, in: .hour, for: date) else { return nil }
+                guard let minute = ordinality(of: .minute, in: .hour, for: date) else { return nil }
                 let second = (minute - 1) * 60 + Int(ucal_get(ucalendar, UCAL_SECOND, &status)) + 1
                 return second
             case .nanosecond:
-                guard let second = _locked_ordinality(of: .second, in: .hour, for: date) else { return nil }
+                guard let second = ordinality(of: .second, in: .hour, for: date) else { return nil }
                 let dseconds = (Double(second) - 1.0) + (date.timeIntervalSinceReferenceDate - floor(date.timeIntervalSinceReferenceDate))
                 return Int(dseconds * 1.0e9) + 1
 
@@ -1098,7 +1177,7 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
                 let second = Int(ucal_get(ucalendar, UCAL_SECOND, &status)) + 1
                 return second
             case .nanosecond:
-                guard let second = _locked_ordinality(of: .second, in: .minute, for: date) else { return nil }
+                guard let second = ordinality(of: .second, in: .minute, for: date) else { return nil }
                 let dseconds = (Double(second) - 1.0) + (date.timeIntervalSinceReferenceDate - floor(date.timeIntervalSinceReferenceDate))
                 return Int(dseconds * 1.0e9) + 1
 
@@ -1125,266 +1204,227 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
         // No return here to ensure we've covered all cases in switch statements above, even via `default`.
     }
 
-    // MARK: - Date Interval Creation
-
-    func dateInterval(of component: Calendar.Component, for date: Date) -> DateInterval? {
-        lock.withLock {
-            _locked_dateInterval(of: component, at: date)
-        }
-    }
-
     // MARK: - Weekends and Special Times
 
     func isDateInWeekend(_ date: Date) -> Bool {
-        return lock.withLock {
-            var status = U_ZERO_ERROR
-            return ucal_isWeekend(ucalendar, date.udate, &status).boolValue
-        }
+        var status = U_ZERO_ERROR
+        return ucal_isWeekend(ucalendar, date.udate, &status).boolValue
     }
 
     // MARK: - Date Creation / Matching Primitives
 
     func date(from components: DateComponents) -> Date? {
-        // If the components specifies a new time zone, we need to copy ourselves and perform this calculation with the new `ucalendar` instance. timeZone is immutable.
-        if let tz = components.timeZone {
-            let withTz = copy(changingTimeZone: tz)
-
-            // Clear the dc time zone or we'll recurse forever
-            var dc = components
-            dc.timeZone = nil
-            return withTz.date(from: dc)
+        // If the components specifies a new time zone, we should have copied ourselves and performed this calculation with the new `ucalendar` instance. timeZone is immutable. Validate this by making sure time zone is nil in components.
+        if components.timeZone != nil {
+            fatalError("DateComponents and Calendar had a mismatched TimeZone value")
         }
 
-        return lock.withLock {
-            ucal_clear(ucalendar)
-            ucal_set(ucalendar, UCAL_YEAR, 1)
-            ucal_set(ucalendar, UCAL_MONTH, 0)
-            ucal_set(ucalendar, UCAL_IS_LEAP_MONTH, 0)
-            ucal_set(ucalendar, UCAL_DAY_OF_MONTH, 1)
-            ucal_set(ucalendar, UCAL_HOUR_OF_DAY, 0)
-            ucal_set(ucalendar, UCAL_MINUTE, 0)
-            ucal_set(ucalendar, UCAL_SECOND, 0)
-            ucal_set(ucalendar, UCAL_MILLISECOND, 0)
-
-            var nanosecond = 0.0
-
-            if let value = components.era { ucal_set(ucalendar, UCAL_ERA, Int32(truncatingIfNeeded: value)) }
-            if let value = components.year { ucal_set(ucalendar, UCAL_YEAR, Int32(truncatingIfNeeded: value)) }
-            // quarter is unsupported
-            if let value = components.weekOfYear { ucal_set(ucalendar, UCAL_WEEK_OF_YEAR, Int32(truncatingIfNeeded: value)) }
-            if let value = components.weekOfMonth { ucal_set(ucalendar, UCAL_WEEK_OF_MONTH, Int32(truncatingIfNeeded: value)) }
-            if let value = components.yearForWeekOfYear { ucal_set(ucalendar, UCAL_YEAR_WOY, Int32(truncatingIfNeeded: value)) }
-            if let value = components.weekday { ucal_set(ucalendar, UCAL_DAY_OF_WEEK, Int32(truncatingIfNeeded: value)) }
-            if let value = components.weekdayOrdinal { ucal_set(ucalendar, UCAL_DAY_OF_WEEK_IN_MONTH, Int32(truncatingIfNeeded: value)) }
-            // DateComponents month field is +1 from ICU
-            if let value = components.month { ucal_set(ucalendar, UCAL_MONTH, Int32(truncatingIfNeeded: value - 1)) }
-
-            // The later the value is set via `ucal_set` the higher priority it takes when ICU resolves ambiguous components. For compatibility, always set `day of year` before `day (of month)`
-            if let value = components.dayOfYear { ucal_set(ucalendar, UCAL_DAY_OF_YEAR, Int32(truncatingIfNeeded: value)) }
-            if let value = components.day { ucal_set(ucalendar, UCAL_DAY_OF_MONTH, Int32(truncatingIfNeeded: value)) }
-            if let value = components.hour { ucal_set(ucalendar, UCAL_HOUR_OF_DAY, Int32(truncatingIfNeeded: value)) }
-            if let value = components.minute { ucal_set(ucalendar, UCAL_MINUTE, Int32(truncatingIfNeeded: value)) }
-            if let value = components.second { ucal_set(ucalendar, UCAL_SECOND, Int32(truncatingIfNeeded: value)) }
-            if let value = components.nanosecond { nanosecond = Double(value) }
-            if let isLeap = components.isLeapMonth, isLeap { ucal_set(ucalendar, UCAL_IS_LEAP_MONTH, 1) }
-
-            var status = U_ZERO_ERROR
-            let udate = ucal_getMillis(ucalendar, &status)
-            var date = Date(udate: udate) + nanosecond * 1.0e-9
-            if let tzInterval = _locked_timeZoneTransitionInterval(at: date) {
-                // Adjust the date backwards to account for the duration of the time zone transition
-                date = date - tzInterval.duration
-            }
-
-            guard status.isSuccess else {
-                return nil
-            }
-
-            return date
+        ucal_clear(ucalendar)
+        ucal_set(ucalendar, UCAL_YEAR, 1)
+        ucal_set(ucalendar, UCAL_MONTH, 0)
+        ucal_set(ucalendar, UCAL_IS_LEAP_MONTH, 0)
+        ucal_set(ucalendar, UCAL_DAY_OF_MONTH, 1)
+        ucal_set(ucalendar, UCAL_HOUR_OF_DAY, 0)
+        ucal_set(ucalendar, UCAL_MINUTE, 0)
+        ucal_set(ucalendar, UCAL_SECOND, 0)
+        ucal_set(ucalendar, UCAL_MILLISECOND, 0)
+        
+        var nanosecond = 0.0
+        
+        if let value = components.era { ucal_set(ucalendar, UCAL_ERA, Int32(truncatingIfNeeded: value)) }
+        if let value = components.year { ucal_set(ucalendar, UCAL_YEAR, Int32(truncatingIfNeeded: value)) }
+        // quarter is unsupported
+        if let value = components.weekOfYear { ucal_set(ucalendar, UCAL_WEEK_OF_YEAR, Int32(truncatingIfNeeded: value)) }
+        if let value = components.weekOfMonth { ucal_set(ucalendar, UCAL_WEEK_OF_MONTH, Int32(truncatingIfNeeded: value)) }
+        if let value = components.yearForWeekOfYear { ucal_set(ucalendar, UCAL_YEAR_WOY, Int32(truncatingIfNeeded: value)) }
+        if let value = components.weekday { ucal_set(ucalendar, UCAL_DAY_OF_WEEK, Int32(truncatingIfNeeded: value)) }
+        if let value = components.weekdayOrdinal { ucal_set(ucalendar, UCAL_DAY_OF_WEEK_IN_MONTH, Int32(truncatingIfNeeded: value)) }
+        // DateComponents month field is +1 from ICU
+        if let value = components.month { ucal_set(ucalendar, UCAL_MONTH, Int32(truncatingIfNeeded: value - 1)) }
+        
+        // The later the value is set via `ucal_set` the higher priority it takes when ICU resolves ambiguous components. For compatibility, always set `day of year` before `day (of month)`
+        if let value = components.dayOfYear { ucal_set(ucalendar, UCAL_DAY_OF_YEAR, Int32(truncatingIfNeeded: value)) }
+        if let value = components.day { ucal_set(ucalendar, UCAL_DAY_OF_MONTH, Int32(truncatingIfNeeded: value)) }
+        if let value = components.hour { ucal_set(ucalendar, UCAL_HOUR_OF_DAY, Int32(truncatingIfNeeded: value)) }
+        if let value = components.minute { ucal_set(ucalendar, UCAL_MINUTE, Int32(truncatingIfNeeded: value)) }
+        if let value = components.second { ucal_set(ucalendar, UCAL_SECOND, Int32(truncatingIfNeeded: value)) }
+        if let value = components.nanosecond { nanosecond = Double(value) }
+        if let isLeap = components.isLeapMonth, isLeap { ucal_set(ucalendar, UCAL_IS_LEAP_MONTH, 1) }
+        
+        var status = U_ZERO_ERROR
+        let udate = ucal_getMillis(ucalendar, &status)
+        var date = Date(udate: udate) + nanosecond * 1.0e-9
+        if let tzInterval = timeZoneTransitionInterval(at: date) {
+            // Adjust the date backwards to account for the duration of the time zone transition
+            date = date - tzInterval.duration
         }
-    }
-
-    func dateComponents(_ components: Calendar.ComponentSet, from date: Date, in timeZone: TimeZone) -> DateComponents {
-        if self.timeZone != timeZone {
-            // Make a copy of ourselves with the new time zone set
-            let withTz = copy(changingTimeZone: timeZone)
-            return withTz.dateComponents(components, from: date)
-        } else {
-            return dateComponents(components, from: date)
+        
+        guard status.isSuccess else {
+            return nil
         }
+        
+        return date
     }
 
     func dateComponents(_ components: Calendar.ComponentSet, from date: Date) -> DateComponents {
-        return lock.withLock {
-            let capped = date.capped
-            var status = U_ZERO_ERROR
-            ucal_clear(ucalendar)
-            ucal_setMillis(ucalendar, capped.udateInSeconds, &status)
+        let capped = date.capped
+        var status = U_ZERO_ERROR
+        ucal_clear(ucalendar)
+        ucal_setMillis(ucalendar, capped.udateInSeconds, &status)
 
-            var dc = DateComponents()
-            if components.contains(.era) { dc.era = Int(ucal_get(ucalendar, UCAL_ERA, &status)) }
-            if components.contains(.year) { dc.year = Int(ucal_get(ucalendar, UCAL_YEAR, &status)) }
-            // unsupported, always filled out to 0
-            if components.contains(.quarter) { dc.quarter = 0 }
-            // ICU's Month is -1 from DateComponents
-            if components.contains(.month) { dc.month = Int(ucal_get(ucalendar, UCAL_MONTH, &status)) + 1 }
-            if components.contains(.day) { dc.day = Int(ucal_get(ucalendar, UCAL_DAY_OF_MONTH, &status)) }
-            if components.contains(.dayOfYear) { dc.dayOfYear = Int(ucal_get(ucalendar, UCAL_DAY_OF_YEAR, &status)) }
-            if components.contains(.weekOfYear) { dc.weekOfYear = Int(ucal_get(ucalendar, UCAL_WEEK_OF_YEAR, &status)) }
-            if components.contains(.weekOfMonth) { dc.weekOfMonth = Int(ucal_get(ucalendar, UCAL_WEEK_OF_MONTH, &status)) }
-            if components.contains(.yearForWeekOfYear) { dc.yearForWeekOfYear = Int(ucal_get(ucalendar, UCAL_YEAR_WOY, &status)) }
-            if components.contains(.weekday) { dc.weekday = Int(ucal_get(ucalendar, UCAL_DAY_OF_WEEK, &status)) }
-            if components.contains(.weekdayOrdinal) { dc.weekdayOrdinal = Int(ucal_get(ucalendar, UCAL_DAY_OF_WEEK_IN_MONTH, &status)) }
-            if components.contains(.hour) { dc.hour = Int(ucal_get(ucalendar, UCAL_HOUR_OF_DAY, &status)) }
-            if components.contains(.minute) { dc.minute = Int(ucal_get(ucalendar, UCAL_MINUTE, &status)) }
-            if components.contains(.second) { dc.second = Int(ucal_get(ucalendar, UCAL_SECOND, &status)) }
-            if components.contains(.nanosecond) { dc.nanosecond = Int((capped.timeIntervalSinceReferenceDate - floor(capped.timeIntervalSinceReferenceDate)) * 1.0e+9) }
+        var dc = DateComponents()
+        if components.contains(.era) { dc.era = Int(ucal_get(ucalendar, UCAL_ERA, &status)) }
+        if components.contains(.year) { dc.year = Int(ucal_get(ucalendar, UCAL_YEAR, &status)) }
+        // unsupported, always filled out to 0
+        if components.contains(.quarter) { dc.quarter = 0 }
+        // ICU's Month is -1 from DateComponents
+        if components.contains(.month) { dc.month = Int(ucal_get(ucalendar, UCAL_MONTH, &status)) + 1 }
+        if components.contains(.day) { dc.day = Int(ucal_get(ucalendar, UCAL_DAY_OF_MONTH, &status)) }
+        if components.contains(.dayOfYear) { dc.dayOfYear = Int(ucal_get(ucalendar, UCAL_DAY_OF_YEAR, &status)) }
+        if components.contains(.weekOfYear) { dc.weekOfYear = Int(ucal_get(ucalendar, UCAL_WEEK_OF_YEAR, &status)) }
+        if components.contains(.weekOfMonth) { dc.weekOfMonth = Int(ucal_get(ucalendar, UCAL_WEEK_OF_MONTH, &status)) }
+        if components.contains(.yearForWeekOfYear) { dc.yearForWeekOfYear = Int(ucal_get(ucalendar, UCAL_YEAR_WOY, &status)) }
+        if components.contains(.weekday) { dc.weekday = Int(ucal_get(ucalendar, UCAL_DAY_OF_WEEK, &status)) }
+        if components.contains(.weekdayOrdinal) { dc.weekdayOrdinal = Int(ucal_get(ucalendar, UCAL_DAY_OF_WEEK_IN_MONTH, &status)) }
+        if components.contains(.hour) { dc.hour = Int(ucal_get(ucalendar, UCAL_HOUR_OF_DAY, &status)) }
+        if components.contains(.minute) { dc.minute = Int(ucal_get(ucalendar, UCAL_MINUTE, &status)) }
+        if components.contains(.second) { dc.second = Int(ucal_get(ucalendar, UCAL_SECOND, &status)) }
+        if components.contains(.nanosecond) { dc.nanosecond = Int((capped.timeIntervalSinceReferenceDate - floor(capped.timeIntervalSinceReferenceDate)) * 1.0e+9) }
 
-            // TODO: See if we can exclude this for calendars which do not use leap month
-            if components.contains(.isLeapMonth) || components.contains(.month) {
-                let result = ucal_get(ucalendar, UCAL_IS_LEAP_MONTH, &status)
-                dc.isLeapMonth = result == 0 ? false : true
-            }
-
-            if components.contains(.timeZone) {
-                dc.timeZone = timeZone
-            }
-
-        
-            return dc
+        // TODO: See if we can exclude this for calendars which do not use leap month
+        if components.contains(.isLeapMonth) || components.contains(.month) {
+            let result = ucal_get(ucalendar, UCAL_IS_LEAP_MONTH, &status)
+            dc.isLeapMonth = result == 0 ? false : true
         }
+
+        if components.contains(.timeZone) {
+            dc.timeZone = timeZone
+        }
+
+    
+        return dc
     }
 
     // MARK: -
 
     func date(byAdding components: DateComponents, to date: Date, wrappingComponents: Bool) -> Date? {
-        return lock.withLock {
-            let capped = date.capped
+        let capped = date.capped
 
-            var status = U_ZERO_ERROR
-            ucal_clear(ucalendar)
-            var (startingInt, startingFrac) = modf(capped.timeIntervalSinceReferenceDate)
+        var status = U_ZERO_ERROR
+        ucal_clear(ucalendar)
+        var (startingInt, startingFrac) = modf(capped.timeIntervalSinceReferenceDate)
 
-            if startingFrac < 0 {
-                // `modf` returns negative integral and fractional parts when `capped.timeIntervalSinceReferenceDate` is negative. In this case, we would wrongly turn the time backwards by adding the negative fractional part back after we're done with wrapping in `add` below. To avoid this, ensure that `startingFrac` is always positive: subseconds do not contribute to the wrapping of a second, so they should always be additive to the time ahead.
-                startingFrac += 1.0
-                startingInt -= 1.0
-            }
+        if startingFrac < 0 {
+            // `modf` returns negative integral and fractional parts when `capped.timeIntervalSinceReferenceDate` is negative. In this case, we would wrongly turn the time backwards by adding the negative fractional part back after we're done with wrapping in `add` below. To avoid this, ensure that `startingFrac` is always positive: subseconds do not contribute to the wrapping of a second, so they should always be additive to the time ahead.
+            startingFrac += 1.0
+            startingInt -= 1.0
+        }
 
-            ucal_setMillis(ucalendar, Date(timeIntervalSinceReferenceDate: startingInt).udate, &status)
-            var nanosecond = 0
+        ucal_setMillis(ucalendar, Date(timeIntervalSinceReferenceDate: startingInt).udate, &status)
+        var nanosecond = 0
 
-            // No leap month support needed here, since these are quantities, not values
+        // No leap month support needed here, since these are quantities, not values
 
-            // Add from the largest component to the smallest to match the order used in `dateComponents(_:from:to:)` to allow round tripping
-            // The results are the same for most cases regardless of the order except for when the addition moves the date across DST transition.
-            // We aim to maintain the clock time when adding larger-than-day units, so that the time in the day remains unchanged even after time zone changes. However, we cannot hold this promise if the result lands in the "skipped hour" on the DST start date as that time does not actually exist. In this case we adjust the time of the day to the correct timezone. There is always some ambiguity, but matching the order used in `dateComponents(_:from:to:)` at least allows round tripping.
-            if let amount = components.era { _ = _locked_add(UCAL_ERA, amount: amount, wrap: wrappingComponents, status: &status) }
-            if let amount = components.year { _ = _locked_add(UCAL_YEAR, amount: amount, wrap: wrappingComponents, status: &status) }
-            if let amount = components.yearForWeekOfYear { _ = _locked_add(UCAL_YEAR_WOY, amount: amount, wrap: wrappingComponents, status: &status) }
-            // TODO: Support quarter
-            // if let _ = components.quarter {  }
-            if let amount = components.month { _ = _locked_add(UCAL_MONTH, amount: amount, wrap: wrappingComponents, status: &status) }
+        // Add from the largest component to the smallest to match the order used in `dateComponents(_:from:to:)` to allow round tripping
+        // The results are the same for most cases regardless of the order except for when the addition moves the date across DST transition.
+        // We aim to maintain the clock time when adding larger-than-day units, so that the time in the day remains unchanged even after time zone changes. However, we cannot hold this promise if the result lands in the "skipped hour" on the DST start date as that time does not actually exist. In this case we adjust the time of the day to the correct timezone. There is always some ambiguity, but matching the order used in `dateComponents(_:from:to:)` at least allows round tripping.
+        if let amount = components.era { _ = add(UCAL_ERA, amount: amount, wrap: wrappingComponents, status: &status) }
+        if let amount = components.year { _ = add(UCAL_YEAR, amount: amount, wrap: wrappingComponents, status: &status) }
+        if let amount = components.yearForWeekOfYear { _ = add(UCAL_YEAR_WOY, amount: amount, wrap: wrappingComponents, status: &status) }
+        // TODO: Support quarter
+        // if let _ = components.quarter {  }
+        if let amount = components.month { _ = add(UCAL_MONTH, amount: amount, wrap: wrappingComponents, status: &status) }
 
-            // Weeks
-            if let amount = components.weekOfYear { _ = _locked_add(UCAL_WEEK_OF_YEAR, amount: amount, wrap: wrappingComponents, status: &status) }
-            if let amount = components.weekOfMonth { _ = _locked_add(UCAL_WEEK_OF_MONTH, amount: amount, wrap: wrappingComponents, status: &status) }
-            if let amount = components.weekdayOrdinal { _ = _locked_add(UCAL_DAY_OF_WEEK_IN_MONTH, amount: amount, wrap: wrappingComponents, status: &status) }
-            // `week` is for backward compatibility only, and is only used if weekOfYear is missing
-            if let amount = components.week, components.weekOfYear == nil { _ = _locked_add(UCAL_WEEK_OF_YEAR, amount: amount, wrap: wrappingComponents, status: &status) }
+        // Weeks
+        if let amount = components.weekOfYear { _ = add(UCAL_WEEK_OF_YEAR, amount: amount, wrap: wrappingComponents, status: &status) }
+        if let amount = components.weekOfMonth { _ = add(UCAL_WEEK_OF_MONTH, amount: amount, wrap: wrappingComponents, status: &status) }
+        if let amount = components.weekdayOrdinal { _ = add(UCAL_DAY_OF_WEEK_IN_MONTH, amount: amount, wrap: wrappingComponents, status: &status) }
+        // `week` is for backward compatibility only, and is only used if weekOfYear is missing
+        if let amount = components.week, components.weekOfYear == nil { _ = add(UCAL_WEEK_OF_YEAR, amount: amount, wrap: wrappingComponents, status: &status) }
 
-            // Days
-            if let amount = components.day { _ = _locked_add(UCAL_DAY_OF_MONTH, amount: amount, wrap: wrappingComponents, status: &status) }
-            if let amount = components.dayOfYear { _ = _locked_add(UCAL_DAY_OF_YEAR, amount: amount, wrap: wrappingComponents, status: &status) }
-            if let amount = components.weekday { _ = _locked_add(UCAL_DAY_OF_WEEK, amount: amount, wrap: wrappingComponents, status: &status) }
+        // Days
+        if let amount = components.day { _ = add(UCAL_DAY_OF_MONTH, amount: amount, wrap: wrappingComponents, status: &status) }
+        if let amount = components.dayOfYear { _ = add(UCAL_DAY_OF_YEAR, amount: amount, wrap: wrappingComponents, status: &status) }
+        if let amount = components.weekday { _ = add(UCAL_DAY_OF_WEEK, amount: amount, wrap: wrappingComponents, status: &status) }
 
-            if let amount = components.hour { _ = _locked_add(UCAL_HOUR_OF_DAY, amount: amount, wrap: wrappingComponents, status: &status) }
-            if let amount = components.minute { _ = _locked_add(UCAL_MINUTE, amount: amount, wrap: wrappingComponents, status: &status) }
-            if let amount = components.second { _ = _locked_add(UCAL_SECOND, amount: amount, wrap: wrappingComponents, status: &status) }
-            if let amount = components.nanosecond { nanosecond = amount }
+        if let amount = components.hour { _ = add(UCAL_HOUR_OF_DAY, amount: amount, wrap: wrappingComponents, status: &status) }
+        if let amount = components.minute { _ = add(UCAL_MINUTE, amount: amount, wrap: wrappingComponents, status: &status) }
+        if let amount = components.second { _ = add(UCAL_SECOND, amount: amount, wrap: wrappingComponents, status: &status) }
+        if let amount = components.nanosecond { nanosecond = amount }
 
-            let udate = ucal_getMillis(self.ucalendar, &status)
-            if status.isSuccess {
-                return Date(udate: udate) + startingFrac + (Double(nanosecond) * 1.0e-9)
-            } else {
-                return nil
-            }
+        let udate = ucal_getMillis(self.ucalendar, &status)
+        if status.isSuccess {
+            return Date(udate: udate) + startingFrac + (Double(nanosecond) * 1.0e-9)
+        } else {
+            return nil
         }
     }
 
     func dateComponents(_ components: Calendar.ComponentSet, from start: Date, to end: Date) -> DateComponents {
-        return lock.withLock {
-            let cappedStart = start.capped
-            let cappedEnd = end.capped
+        let cappedStart = start.capped
+        let cappedEnd = end.capped
 
-            var status = U_ZERO_ERROR
-            ucal_clear(ucalendar)
+        var status = U_ZERO_ERROR
+        ucal_clear(ucalendar)
 
-            var curr = cappedStart.udate
-            let currX = floor(curr)
-            let diff = curr - currX
-            curr = currX
-            var goal = cappedEnd.udate
-            goal -= diff
+        var curr = cappedStart.udate
+        let currX = floor(curr)
+        let diff = curr - currX
+        curr = currX
+        var goal = cappedEnd.udate
+        goal -= diff
 
+        ucal_setMillis(ucalendar, curr, &status)
+
+        var dc = DateComponents()
+        // No leap month support needed here, since these are quantities, not values
+
+        if components.contains(.era) {
+            // ICU refuses to do the subtraction, probably because we are at the limit of UCAL_ERA.  Use alternate strategy.
+            curr = ucal_getMillis(ucalendar, &status)
+            let currEra = ucal_get(ucalendar, UCAL_ERA, &status)
+            ucal_setMillis(ucalendar, goal, &status)
+            let goalEra = ucal_get(ucalendar, UCAL_ERA, &status)
             ucal_setMillis(ucalendar, curr, &status)
-
-            var dc = DateComponents()
-            // No leap month support needed here, since these are quantities, not values
-
-            if components.contains(.era) {
-                // ICU refuses to do the subtraction, probably because we are at the limit of UCAL_ERA.  Use alternate strategy.
-                curr = ucal_getMillis(ucalendar, &status)
-                let currEra = ucal_get(ucalendar, UCAL_ERA, &status)
-                ucal_setMillis(ucalendar, goal, &status)
-                let goalEra = ucal_get(ucalendar, UCAL_ERA, &status)
-                ucal_setMillis(ucalendar, curr, &status)
-                ucal_set(ucalendar, UCAL_ERA, goalEra)
-                dc.era = Int(goalEra - currEra)
-            }
-            if components.contains(.year) { dc.year = Int(ucal_getFieldDifference(ucalendar, goal, UCAL_YEAR, &status)) }
-            if components.contains(.yearForWeekOfYear) { dc.yearForWeekOfYear = Int(ucal_getFieldDifference(ucalendar, goal, UCAL_YEAR_WOY, &status)) }
-            if components.contains(.quarter) {
-                // unsupported, always filled out to 0
-                dc.quarter = 0
-            }
-            if components.contains(.month) { dc.month = Int(ucal_getFieldDifference(ucalendar, goal, UCAL_MONTH, &status)) }
-            if components.contains(.weekOfYear) { dc.weekOfYear = Int(ucal_getFieldDifference(ucalendar, goal, UCAL_WEEK_OF_YEAR, &status)) }
-            if components.contains(.weekOfMonth) { dc.weekOfMonth = Int(ucal_getFieldDifference(ucalendar, goal, UCAL_WEEK_OF_MONTH, &status)) }
-            if components.contains(.day) { dc.day = Int(ucal_getFieldDifference(ucalendar, goal, UCAL_DAY_OF_MONTH, &status)) }
-            if components.contains(.dayOfYear) { dc.dayOfYear = Int(ucal_getFieldDifference(ucalendar, goal, UCAL_DAY_OF_YEAR, &status)) }
-            if components.contains(.weekday) { dc.weekday = Int(ucal_getFieldDifference(ucalendar, goal, UCAL_DAY_OF_WEEK, &status)) }
-            if components.contains(.weekdayOrdinal) { dc.weekdayOrdinal = Int(ucal_getFieldDifference(ucalendar, goal, UCAL_DAY_OF_WEEK_IN_MONTH, &status)) }
-            if components.contains(.hour) { dc.hour = Int(ucal_getFieldDifference(ucalendar, goal, UCAL_HOUR_OF_DAY, &status)) }
-            if components.contains(.minute) { dc.minute = Int(ucal_getFieldDifference(ucalendar, goal, UCAL_MINUTE, &status)) }
-            if components.contains(.second) { dc.second = Int(ucal_getFieldDifference(ucalendar, goal, UCAL_SECOND, &status)) }
-            if components.contains(.nanosecond) {
-                let curr0 = ucal_getMillis(ucalendar, &status)
-                let tmp = floor((goal - curr0) * 1.0e+6)
-                if tmp >= Double(Int32.max) {
-                    dc.nanosecond = Int(Int32.max)
-                } else if tmp <= Double(Int32.min) {
-                    dc.nanosecond = Int(Int32.min)
-                } else {
-                    dc.nanosecond = Int(tmp)
-                }
-            }
-
-            return dc
+            ucal_set(ucalendar, UCAL_ERA, goalEra)
+            dc.era = Int(goalEra - currEra)
         }
+        if components.contains(.year) { dc.year = Int(ucal_getFieldDifference(ucalendar, goal, UCAL_YEAR, &status)) }
+        if components.contains(.yearForWeekOfYear) { dc.yearForWeekOfYear = Int(ucal_getFieldDifference(ucalendar, goal, UCAL_YEAR_WOY, &status)) }
+        if components.contains(.quarter) {
+            // unsupported, always filled out to 0
+            dc.quarter = 0
+        }
+        if components.contains(.month) { dc.month = Int(ucal_getFieldDifference(ucalendar, goal, UCAL_MONTH, &status)) }
+        if components.contains(.weekOfYear) { dc.weekOfYear = Int(ucal_getFieldDifference(ucalendar, goal, UCAL_WEEK_OF_YEAR, &status)) }
+        if components.contains(.weekOfMonth) { dc.weekOfMonth = Int(ucal_getFieldDifference(ucalendar, goal, UCAL_WEEK_OF_MONTH, &status)) }
+        if components.contains(.day) { dc.day = Int(ucal_getFieldDifference(ucalendar, goal, UCAL_DAY_OF_MONTH, &status)) }
+        if components.contains(.dayOfYear) { dc.dayOfYear = Int(ucal_getFieldDifference(ucalendar, goal, UCAL_DAY_OF_YEAR, &status)) }
+        if components.contains(.weekday) { dc.weekday = Int(ucal_getFieldDifference(ucalendar, goal, UCAL_DAY_OF_WEEK, &status)) }
+        if components.contains(.weekdayOrdinal) { dc.weekdayOrdinal = Int(ucal_getFieldDifference(ucalendar, goal, UCAL_DAY_OF_WEEK_IN_MONTH, &status)) }
+        if components.contains(.hour) { dc.hour = Int(ucal_getFieldDifference(ucalendar, goal, UCAL_HOUR_OF_DAY, &status)) }
+        if components.contains(.minute) { dc.minute = Int(ucal_getFieldDifference(ucalendar, goal, UCAL_MINUTE, &status)) }
+        if components.contains(.second) { dc.second = Int(ucal_getFieldDifference(ucalendar, goal, UCAL_SECOND, &status)) }
+        if components.contains(.nanosecond) {
+            let curr0 = ucal_getMillis(ucalendar, &status)
+            let tmp = floor((goal - curr0) * 1.0e+6)
+            if tmp >= Double(Int32.max) {
+                dc.nanosecond = Int(Int32.max)
+            } else if tmp <= Double(Int32.min) {
+                dc.nanosecond = Int(Int32.min)
+            } else {
+                dc.nanosecond = Int(tmp)
+            }
+        }
+
+        return dc
     }
 
     // MARK: - Helpers
 
     // Exposed for testing
-    internal func startOf(of unit: Calendar.Component, at: Date) -> Date? {
-        lock.withLock { _ in
-            _locked_start(of: unit, at: at)
-        }
-    }
-
-    private func _locked_start(of unit: Calendar.Component, at: Date) -> Date? {
-        // This shares some magic numbers with _locked_dateInterval, but the clarity at the call site of using only the start date vs needing the interval (plus the performance benefit of not calculating it if we don't need it) makes the duplication worth it.
+    internal func start(of unit: Calendar.Component, at: Date) -> Date? {
+        // This shares some magic numbers with dateInterval, but the clarity at the call site of using only the start date vs needing the interval (plus the performance benefit of not calculating it if we don't need it) makes the duplication worth it.
         let capped = at.capped
 
         let inf_ti : TimeInterval = 4398046511104.0
@@ -1472,14 +1512,16 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
         }
 
         // Set UCalendar to first instant of unit prior to 'at'
-        _locked_setToFirstInstant(of: effectiveUnit, at: capped)
+        setToFirstInstant(of: effectiveUnit, at: capped)
 
         var status = U_ZERO_ERROR
         let startUDate = ucal_getMillis(ucalendar, &status)
         return Date(udate: startUDate)
     }
 
-    private func _locked_dateInterval(of unit: Calendar.Component, at: Date) -> DateInterval? {
+    // MARK: - Date Interval Creation
+
+    func dateInterval(of unit: Calendar.Component, at: Date) -> DateInterval? {
         let capped = at.capped
 
         let inf_ti : TimeInterval = 4398046511104.0
@@ -1567,7 +1609,7 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
         }
 
         // Set UCalendar to first instant of unit prior to 'at'
-        _locked_setToFirstInstant(of: effectiveUnit, at: capped)
+        setToFirstInstant(of: effectiveUnit, at: capped)
 
         var status = U_ZERO_ERROR
         let startUDate = ucal_getMillis(ucalendar, &status)
@@ -1630,7 +1672,7 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
 
         status = U_ZERO_ERROR;
         let end = Date(udate: ucal_getMillis(ucalendar, &status))
-        if let tzTransition = _locked_timeZoneTransitionInterval(at: end) {
+        if let tzTransition = timeZoneTransitionInterval(at: end) {
             return DateInterval(start: start, end: end - tzTransition.duration)
         } else if end > start {
             return DateInterval(start: start, end: end)
@@ -1640,11 +1682,7 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
         }
     }
 
-    private func _locked_nextDaylightSavingTimeTransition(startingAt: Date, limit: Date) -> Date? {
-        _TimeZoneICU.nextDaylightSavingTimeTransition(forLocked: ucalendar, startingAt: startingAt, limit: limit)
-    }
-
-    private func _locked_timeZoneTransitionInterval(at date: Date) -> DateInterval? {
+    private func timeZoneTransitionInterval(at date: Date) -> DateInterval? {
         // if the given time is before 1900, assume there is no dst transition yet
         if date.timeIntervalSinceReferenceDate < -3187299600.0 {
             return nil
@@ -1653,8 +1691,7 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
         // start back 48 hours
         let start = date - 48.0 * 60.0 * 60.0
 
-
-        guard let nextDSTTransition = _locked_nextDaylightSavingTimeTransition(startingAt: start, limit: start + 4 * 8600 * 1000.0) else {
+        guard let nextDSTTransition = _TimeZoneICU.nextDaylightSavingTimeTransition(forLocked: ucalendar, startingAt: start, limit: start + 4 * 8600 * 1000.0) else {
             return nil
         }
 
@@ -1677,24 +1714,22 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
     }
 
     // for testing only
-    internal func firstInstant(of unit: Calendar.Component, at: Date) -> Date {
+    func firstInstant(of unit: Calendar.Component, at: Date) -> Date {
         let at = at.capped
-        return lock.withLock {
-            var status = U_ZERO_ERROR
-            let current = ucal_getMillis(ucalendar, &status)
-
-            _locked_setToFirstInstant(of: unit, at: at)
-            let startUDate = ucal_getMillis(ucalendar, &status)
-            let res = Date(udate: startUDate)
-
-            // restore
-            ucal_setMillis(ucalendar, current, &status)
-            return res
-        }
+        var status = U_ZERO_ERROR
+        let current = ucal_getMillis(ucalendar, &status)
+        
+        setToFirstInstant(of: unit, at: at)
+        let startUDate = ucal_getMillis(ucalendar, &status)
+        let res = Date(udate: startUDate)
+        
+        // restore
+        ucal_setMillis(ucalendar, current, &status)
+        return res
     }
 
     /// Set the calendar to the first instant of a particular component given a point in time. For example, the first instant of a day.
-    private func _locked_setToFirstInstant(of unit: Calendar.Component, at: Date) {
+    private func setToFirstInstant(of unit: Calendar.Component, at: Date) {
         var status = U_ZERO_ERROR
         var udate = at.udateInSeconds
         ucal_setMillis(ucalendar, udate, &status)
@@ -1727,7 +1762,7 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
 
         case .weekOfMonth, .weekOfYear: /* kCFCalendarUnitWeek_Deprecated */
             // reduce to first day of week, then reduce the rest of the day
-            let goal = _locked_firstWeekday
+            let goal = firstWeekday
             var dow = ucal_get(ucalendar, UCAL_DAY_OF_WEEK, &status)
             while dow != goal {
                 ucal_add(ucalendar, UCAL_DAY_OF_MONTH, -3, &status)
@@ -1829,13 +1864,13 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
         udate = ucal_getMillis(ucalendar, &status)
         let start = Date(udate: udate)
 
-        if let tzTransition = _locked_timeZoneTransitionInterval(at: start) {
+        if let tzTransition = timeZoneTransitionInterval(at: start) {
             udate = (start - tzTransition.duration).udate
             ucal_setMillis(ucalendar, udate, &status)
         }
     }
 
-    private func _locked_add(_ field: UCalendarDateFields, amount: Int, wrap: Bool, status: inout UErrorCode) -> UDate {
+    private func add(_ field: UCalendarDateFields, amount: Int, wrap: Bool, status: inout UErrorCode) -> UDate {
         // we rely on ICU to add and roll units which are larger than or equal to DAYs
         // we have an assumption which is we assume that there is no time zone with a backward repeated day
         // at the time of writing this code, there is only one instance of DST that forwards a day
@@ -1891,7 +1926,7 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
                     }
 
                     leftoverTime = totalSecondsInSmallUnits(field, status: &status)
-                    _locked_setToFirstInstant(of: largeField, at: at)
+                    setToFirstInstant(of: largeField, at: at)
                 } else {
                     newAmount = finalValue - originalValue
                 }
@@ -1932,7 +1967,7 @@ internal final class _CalendarICU: _CalendarProtocol, @unchecked Sendable {
 
             let result = ucal_getMillis(ucalendar, &status)
             let start = Date(udate: result)
-            if amount > 0, let interval = _locked_timeZoneTransitionInterval(at: start) {
+            if amount > 0, let interval = timeZoneTransitionInterval(at: start) {
                 let adjusted = (start - interval.duration).udate
                 ucal_setMillis(ucalendar, adjusted, &status)
             }

@@ -77,7 +77,7 @@ let wasiLibcCSettings: [CSetting] = [
 
 let package = Package(
     name: "swift-foundation",
-    platforms: [.macOS("13.3"), .iOS("16.4"), .tvOS("16.4"), .watchOS("9.4")],
+    platforms: [.macOS("15.0"), .iOS("18.0"), .tvOS("18.0"), .watchOS("10.0")],
     products: [
         .library(name: "FoundationEssentials", targets: ["FoundationEssentials"]),
         .library(name: "FoundationInternationalization", targets: ["FoundationInternationalization"]),

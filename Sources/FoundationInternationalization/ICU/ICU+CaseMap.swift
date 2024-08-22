@@ -11,6 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 internal import _FoundationICU
+internal import Synchronization
 
 #if canImport(FoundationEssentials)
 import FoundationEssentials
@@ -20,22 +21,22 @@ extension ICU {
     final class CaseMap : @unchecked Sendable {
         let casemap: OpaquePointer
         
-        let lock: LockedState<Void>
+        // Lock is for ucasemap. This dummy value is for the Mutex.
+        struct UCaseMap { }
+        let lock = Mutex(UCaseMap())
         
         // Empty locale ("") means root locale
         init(localeID: String) throws {
             var status = U_ZERO_ERROR
             casemap = ucasemap_open(localeID, UInt32(), &status)
             try status.checkSuccess()
-            
-            lock = LockedState()
         }
 
         deinit {
             ucasemap_close(casemap)
         }
 
-        private static let _cache: LockedState<[String : CaseMap]> = LockedState(initialState: [:])
+        private static let _cache: Mutex<[String : CaseMap]> = Mutex([:])
         
         // Create and cache a new case mapping object for the specified locale
         internal static func caseMappingForLocale(_ localeID: String?) -> CaseMap? {
@@ -73,7 +74,7 @@ extension ICU {
         }
         
         func titlecase(_ s: Substring) -> String? {
-            lock.withLock {
+            lock.withLock { _ in
                 var s = s
                 return s.withUTF8 { srcBuf in
                     srcBuf.withMemoryRebound(to: CChar.self) { buffer in
@@ -87,7 +88,7 @@ extension ICU {
 
         func titlecase(_ s: String) -> String? {
             // `ucasemap_utf8ToTitle` isn't thread-safe
-            lock.withLock {
+            lock.withLock { _ in
                 s.utf8CString.withUnsafeBufferPointer { srcBuf in
                     _withResizingCharBuffer { destBuf, destSize, status in
                         ucasemap_utf8ToTitle(casemap, destBuf, destSize, srcBuf.baseAddress!, Int32(srcBuf.count), &status)

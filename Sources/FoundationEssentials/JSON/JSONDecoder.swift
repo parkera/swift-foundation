@@ -17,6 +17,7 @@ import Glibc
 #endif
 
 internal import _FoundationCShims
+internal import Synchronization
 
 /// A marker protocol used to determine whether a value is a `String`-keyed `Dictionary`
 /// containing `Decodable` values (in which case it should be exempt from key conversion strategies).
@@ -167,115 +168,81 @@ open class JSONDecoder {
     /// The strategy to use in decoding dates. Defaults to `.deferredToDate`.
     open var dateDecodingStrategy: DateDecodingStrategy {
         get {
-            optionsLock.lock()
-            defer { optionsLock.unlock() }
-            return options.dateDecodingStrategy
+            optionsLock.withLock { $0.dateDecodingStrategy }
         }
         _modify {
-            optionsLock.lock()
-            var value = options.dateDecodingStrategy
-            defer {
-                options.dateDecodingStrategy = value
-                optionsLock.unlock()
-            }
+            var value = optionsLock.withLock { $0.dateDecodingStrategy }
             yield &value
+            let copy = value
+            optionsLock.withLock { $0.dateDecodingStrategy = copy }
         }
         set {
-            optionsLock.lock()
-            defer { optionsLock.unlock() }
-            options.dateDecodingStrategy = newValue
+            optionsLock.withLock { $0.dateDecodingStrategy = newValue }
         }
     }
 
     /// The strategy to use in decoding binary data. Defaults to `.base64`.
     open var dataDecodingStrategy: DataDecodingStrategy {
         get {
-            optionsLock.lock()
-            defer { optionsLock.unlock() }
-            return options.dataDecodingStrategy
+            optionsLock.withLock { $0.dataDecodingStrategy }
         }
         _modify {
-            optionsLock.lock()
-            var value = options.dataDecodingStrategy
-            defer {
-                options.dataDecodingStrategy = value
-                optionsLock.unlock()
-            }
+            var value = optionsLock.withLock { $0.dataDecodingStrategy }
             yield &value
+            let copy = value
+            optionsLock.withLock { $0.dataDecodingStrategy = copy }
         }
         set {
-            optionsLock.lock()
-            defer { optionsLock.unlock() }
-            options.dataDecodingStrategy = newValue
+            optionsLock.withLock { $0.dataDecodingStrategy = newValue }
         }
     }
 
     /// The strategy to use in decoding non-conforming numbers. Defaults to `.throw`.
     open var nonConformingFloatDecodingStrategy: NonConformingFloatDecodingStrategy {
         get {
-            optionsLock.lock()
-            defer { optionsLock.unlock() }
-            return options.nonConformingFloatDecodingStrategy
+            optionsLock.withLock { $0.nonConformingFloatDecodingStrategy }
         }
         _modify {
-            optionsLock.lock()
-            var value = options.nonConformingFloatDecodingStrategy
-            defer {
-                options.nonConformingFloatDecodingStrategy = value
-                optionsLock.unlock()
-            }
+            var value = optionsLock.withLock { $0.nonConformingFloatDecodingStrategy }
             yield &value
+            let copy = value
+            optionsLock.withLock { $0.nonConformingFloatDecodingStrategy = copy }
         }
         set {
-            optionsLock.lock()
-            defer { optionsLock.unlock() }
-            options.nonConformingFloatDecodingStrategy = newValue
+            optionsLock.withLock { $0.nonConformingFloatDecodingStrategy = newValue }
         }
     }
 
     /// The strategy to use for decoding keys. Defaults to `.useDefaultKeys`.
     open var keyDecodingStrategy: KeyDecodingStrategy {
         get {
-            optionsLock.lock()
-            defer { optionsLock.unlock() }
-            return options.keyDecodingStrategy
+            optionsLock.withLock { $0.keyDecodingStrategy }
         }
         _modify {
-            optionsLock.lock()
-            var value = options.keyDecodingStrategy
-            defer {
-                options.keyDecodingStrategy = value
-                optionsLock.unlock()
-            }
+            var value = optionsLock.withLock { $0.keyDecodingStrategy }
             yield &value
+            let copy = value
+            optionsLock.withLock { $0.keyDecodingStrategy = copy }
         }
         set {
-            optionsLock.lock()
-            defer { optionsLock.unlock() }
-            options.keyDecodingStrategy = newValue
+            optionsLock.withLock { $0.keyDecodingStrategy = newValue }
         }
     }
 
     /// Contextual user-provided information for use during decoding.
     open var userInfo: [CodingUserInfoKey : Any] {
         get {
-            optionsLock.lock()
-            defer { optionsLock.unlock() }
-            return options.userInfo
+            optionsLock.withLock { $0.userInfo }
         }
         _modify {
-            optionsLock.lock()
-            var value = options.userInfo
-            defer {
-                options.userInfo = value
-                optionsLock.unlock()
-            }
+            var value = optionsLock.withLock { $0.userInfo }
             yield &value
+            nonisolated(unsafe) let copy = value
+            optionsLock.withLock { $0.userInfo = copy }
         }
         set {
-            optionsLock.lock()
-            defer { optionsLock.unlock() }
-            options.userInfo = newValue
+            nonisolated(unsafe) let nv = newValue
+            optionsLock.withLock { $0.userInfo = nv }
         }
     }
 
@@ -286,7 +253,7 @@ open class JSONDecoder {
             options.json5
         }
         set {
-            options.json5 = newValue
+            optionsLock.withLock { $0.json5 = newValue }
         }
     }
 
@@ -313,9 +280,12 @@ open class JSONDecoder {
         var json5: Bool = false
     }
 
+    private var options: _Options {
+        optionsLock.withLock { $0 }
+    }
+    
     /// The options set on the top-level decoder.
-    fileprivate var options = _Options()
-    fileprivate let optionsLock = LockedState<Void>()
+    fileprivate let optionsLock = Mutex(_Options())
 
     // MARK: - Constructing a JSON Decoder
 

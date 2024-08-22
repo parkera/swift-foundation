@@ -10,6 +10,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+internal import Synchronization
+
 //===----------------------------------------------------------------------===//
 // Plist Encoder
 //===----------------------------------------------------------------------===//
@@ -28,47 +30,39 @@ open class PropertyListEncoder {
     /// The output format to write the property list data in. Defaults to `.binary`.
     open var outputFormat: PropertyListDecoder.PropertyListFormat {
         get {
-            optionsLock.lock()
-            defer { optionsLock.unlock() }
-            return options.outputFormat
+            optionsLock.withLock { $0.outputFormat }
         }
         _modify {
-            optionsLock.lock()
-            var value = options.outputFormat
-            defer {
-                options.outputFormat = value
-                optionsLock.unlock()
-            }
+            var value = optionsLock.withLock { $0.outputFormat }
             yield &value
+            optionsLock.withLock { $0.outputFormat = value }
         }
         set {
-            optionsLock.lock()
-            defer { optionsLock.unlock() }
-            options.outputFormat = newValue
+            optionsLock.withLock { $0.outputFormat = newValue }
         }
     }
 
     /// Contextual user-provided information for use during encoding.
     open var userInfo: [CodingUserInfoKey : Any] {
         get {
-            optionsLock.lock()
-            defer { optionsLock.unlock() }
-            return options.userInfo
+            optionsLock.withLock {
+                $0.userInfo
+            }
         }
         _modify {
-            optionsLock.lock()
-            var value = options.userInfo
-            defer {
-                options.userInfo = value
-                optionsLock.unlock()
-            }
+            var value = optionsLock.withLock { $0.userInfo }
             yield &value
+            nonisolated(unsafe) let copy = value
+            optionsLock.withLock { $0.userInfo = copy }
         }
         set {
-            optionsLock.lock()
-            defer { optionsLock.unlock() }
-            options.userInfo = newValue
+            nonisolated(unsafe) let nv = newValue
+            optionsLock.withLock { $0.userInfo = nv }
         }
+    }
+    
+    private var options: _Options {
+        optionsLock.withLock { $0 }
     }
 
     /// Options set on the top-level encoder to pass down the encoding hierarchy.
@@ -78,8 +72,7 @@ open class PropertyListEncoder {
     }
 
     /// The options set on the top-level encoder.
-    fileprivate var options: _Options = _Options()
-    fileprivate let optionsLock = LockedState<Void>()
+    fileprivate let optionsLock = Mutex(_Options())
 
     // MARK: - Constructing a Property List Encoder
 
@@ -96,7 +89,8 @@ open class PropertyListEncoder {
     /// - throws: An error if any value throws an error during encoding.
     open func encode<Value : Encodable>(_ value: Value) throws -> Data {
         do {
-            switch options.outputFormat {
+            let format = optionsLock.withLock { $0.outputFormat }
+            switch format {
             case .binary:
                 return try _encodeBPlist(value)
             case .xml:
@@ -167,7 +161,8 @@ open class PropertyListEncoder {
     @available(FoundationPreview 0.1, *)
     open func encode<T : EncodableWithConfiguration>(_ value: T, configuration: T.EncodingConfiguration) throws -> Data {
         do {
-            switch options.outputFormat {
+            let format = optionsLock.withLock { $0.outputFormat }
+            switch format {
             case .binary:
                 return try _encodeBPlist(value, configuration: configuration)
             case .xml:

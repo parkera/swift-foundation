@@ -10,6 +10,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+internal import Synchronization
+
 #if canImport(FoundationEssentials)
 import FoundationEssentials
 #endif
@@ -262,7 +264,7 @@ final class ICUDateFormatter : @unchecked Sendable {
     }
 
     static let formatterCache = FormatterCache<DateFormatInfo, ICUDateFormatter?>()
-    static let patternCache = LockedState<[PatternCacheKey : String]>(initialState: [:])
+    static let patternCache = Mutex<[PatternCacheKey : String]>([:])
 
     static func cachedFormatter(for dateFormatInfo: DateFormatInfo) -> ICUDateFormatter? {
         return Self.formatterCache.formatter(for: dateFormatInfo) {
@@ -446,7 +448,7 @@ extension ICUDateFormatter.DateFormatInfo {
         }
     }
 
-    static let updateScheduleCache = LockedState<[Self: UpdateSchedule]>(initialState: [:])
+    static let updateScheduleCache = Mutex<[Self: UpdateSchedule]>([:])
 
     static func cachedUpdateSchedule(for format: Date.VerbatimFormatStyle) -> UpdateSchedule {
         return Self.updateScheduleCache.withLock { state in

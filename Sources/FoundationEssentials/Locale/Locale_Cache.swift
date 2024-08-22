@@ -17,6 +17,7 @@ internal import CoreFoundation_Private.CFNotificationCenter
 internal import os
 #endif
 
+internal import Synchronization
 internal import _FoundationCShims
 
 #if FOUNDATION_FRAMEWORK && canImport(_FoundationICU)
@@ -115,17 +116,17 @@ struct LocaleCache : Sendable, ~Copyable {
         }
     }
 
-    let lock: LockedState<State>
+    let lock: Mutex<State>
     
     static let cache = LocaleCache()
-    private let _currentCache = LockedState<(any _LocaleProtocol)?>(initialState: nil)
+    private let _currentCache = Mutex<(any _LocaleProtocol)?>(nil)
     
 #if FOUNDATION_FRAMEWORK
-    private var _currentNSCache = LockedState<_NSSwiftLocale?>(initialState: nil)
+    private var _currentNSCache = Mutex<_NSSwiftLocale?>(nil)
 #endif
     
     fileprivate init() {
-        lock = LockedState(initialState: State())
+        lock = Mutex(State())
     }
 
     

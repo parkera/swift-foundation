@@ -10,9 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#if canImport(Synchronization) && (!canImport(Darwin) || FOUNDATION_FRAMEWORK)
 internal import Synchronization
-#endif
 
 @available(FoundationPredicate 0.1, *)
 public protocol PredicateExpression<Output> {
@@ -88,7 +86,7 @@ extension PredicateExpressions {
         #if canImport(Synchronization) && (!canImport(Darwin) || FOUNDATION_FRAMEWORK)
         private static let nextID = Atomic<UInt>(0)
         #else
-        private static let nextID = LockedState(initialState: UInt(0))
+        private static let nextID = Mutex(UInt(0))
         #endif
         
         init() {

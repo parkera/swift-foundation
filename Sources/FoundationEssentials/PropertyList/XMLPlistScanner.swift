@@ -11,6 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 internal import _FoundationCShims
+internal import Synchronization
 
 private let plistBytes : StaticString = "plist"
 private let arrayBytes : StaticString = "array"
@@ -169,11 +170,11 @@ class XMLPlistMap : PlistDecodingMap {
     static var nullValue: Value { .null }
 
     let mapBuffer : [Int]
-    var dataLock : LockedState<(buffer: BufferView<UInt8>, allocation: UnsafeRawPointer?)>
+    let dataLock : Mutex<(buffer: BufferView<UInt8>, allocation: UnsafeRawPointer?)>
 
     init(mapBuffer: [Int], dataBuffer: BufferView<UInt8>) {
         self.mapBuffer = mapBuffer
-        self.dataLock = .init(initialState: (buffer: dataBuffer, allocation: nil))
+        self.dataLock = .init((buffer: dataBuffer, allocation: nil))
     }
 
     deinit {

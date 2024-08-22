@@ -11,6 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 internal import _FoundationCShims
+internal import Synchronization
 
 typealias BPlistObjectIndex = Int
 
@@ -98,10 +99,10 @@ class BPlistMap : PlistDecodingMap {
     private let trailer : BPlistTrailer
     let topObjectIndex : BPlistObjectIndex
     let objectOffsets : [UInt64]
-    var dataLock : LockedState<(buffer: BufferView<UInt8>, allocation: UnsafeRawPointer?)>
+    let dataLock : Mutex<(buffer: BufferView<UInt8>, allocation: UnsafeRawPointer?)>
 
     init (buffer: BufferView<UInt8>, trailer: BPlistTrailer, objectOffsets: [UInt64]) {
-        self.dataLock = .init(initialState: (buffer: buffer, allocation: nil))
+        self.dataLock = .init((buffer: buffer, allocation: nil))
         self.trailer = trailer
         self.topObjectIndex = BPlistObjectIndex(trailer._topObject)
         self.objectOffsets = objectOffsets
@@ -158,7 +159,7 @@ class BPlistMap : PlistDecodingMap {
 
     func loadValue(at idx: BPlistObjectIndex) throws -> Value {
         // Sendable note: We do not mutate self from within this lock
-        return try dataLock.withLockUnchecked { state in
+        return try dataLock.withLock { state in
             guard Int(idx) < objectOffsets.count else {
                 throw BPlistError.corruptedValue("object index")
             }

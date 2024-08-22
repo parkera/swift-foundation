@@ -10,6 +10,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+internal import Synchronization
+
 //===----------------------------------------------------------------------===//
 // JSON Encoder
 //===----------------------------------------------------------------------===//
@@ -182,138 +184,97 @@ open class JSONEncoder {
     /// The output format to produce. Defaults to `[]`.
     open var outputFormatting: OutputFormatting {
         get {
-            optionsLock.lock()
-            defer { optionsLock.unlock() }
-            return options.outputFormatting
+            optionsLock.withLock { $0.outputFormatting }
         }
         _modify {
-            optionsLock.lock()
-            var value = options.outputFormatting
-            defer {
-                options.outputFormatting = value
-                optionsLock.unlock()
-            }
+            var value = optionsLock.withLock { $0.outputFormatting }
             yield &value
+            let copy = value
+            optionsLock.withLock { $0.outputFormatting = copy }
         }
         set {
-            optionsLock.lock()
-            defer { optionsLock.unlock() }
-            options.outputFormatting = newValue
+            optionsLock.withLock { $0.outputFormatting = newValue }
         }
     }
 
     /// The strategy to use in encoding dates. Defaults to `.deferredToDate`.
     open var dateEncodingStrategy: DateEncodingStrategy {
         get {
-            optionsLock.lock()
-            defer { optionsLock.unlock() }
-            return options.dateEncodingStrategy
+            optionsLock.withLock { $0.dateEncodingStrategy }
         }
         _modify {
-            optionsLock.lock()
-            var value = options.dateEncodingStrategy
-            defer {
-                options.dateEncodingStrategy = value
-                optionsLock.unlock()
-            }
+            var value = optionsLock.withLock { $0.dateEncodingStrategy }
             yield &value
+            let copy = value
+            optionsLock.withLock { $0.dateEncodingStrategy = copy }
         }
         set {
-            optionsLock.lock()
-            defer { optionsLock.unlock() }
-            options.dateEncodingStrategy = newValue
+            optionsLock.withLock { $0.dateEncodingStrategy = newValue }
         }
     }
 
     /// The strategy to use in encoding binary data. Defaults to `.base64`.
     open var dataEncodingStrategy: DataEncodingStrategy {
         get {
-            optionsLock.lock()
-            defer { optionsLock.unlock() }
-            return options.dataEncodingStrategy
+            optionsLock.withLock { $0.dataEncodingStrategy }
         }
         _modify {
-            optionsLock.lock()
-            var value = options.dataEncodingStrategy
-            defer {
-                options.dataEncodingStrategy = value
-                optionsLock.unlock()
-            }
+            var value = optionsLock.withLock { $0.dataEncodingStrategy }
             yield &value
+            let copy = value
+            optionsLock.withLock { $0.dataEncodingStrategy = copy }
         }
         set {
-            optionsLock.lock()
-            defer { optionsLock.unlock() }
-            options.dataEncodingStrategy = newValue
+            optionsLock.withLock { $0.dataEncodingStrategy = newValue }
         }
     }
 
     /// The strategy to use in encoding non-conforming numbers. Defaults to `.throw`.
     open var nonConformingFloatEncodingStrategy: NonConformingFloatEncodingStrategy {
         get {
-            optionsLock.lock()
-            defer { optionsLock.unlock() }
-            return options.nonConformingFloatEncodingStrategy
+            optionsLock.withLock { $0.nonConformingFloatEncodingStrategy }
         }
         _modify {
-            optionsLock.lock()
-            var value = options.nonConformingFloatEncodingStrategy
-            defer {
-                options.nonConformingFloatEncodingStrategy = value
-                optionsLock.unlock()
-            }
+            var value = optionsLock.withLock { $0.nonConformingFloatEncodingStrategy }
             yield &value
+            let copy = value
+            optionsLock.withLock { $0.nonConformingFloatEncodingStrategy = copy }
         }
         set {
-            optionsLock.lock()
-            defer { optionsLock.unlock() }
-            options.nonConformingFloatEncodingStrategy = newValue
+            optionsLock.withLock { $0.nonConformingFloatEncodingStrategy = newValue }
         }
     }
 
     /// The strategy to use for encoding keys. Defaults to `.useDefaultKeys`.
     open var keyEncodingStrategy: KeyEncodingStrategy {
         get {
-            optionsLock.lock()
-            defer { optionsLock.unlock() }
-            return options.keyEncodingStrategy
+            optionsLock.withLock { $0.keyEncodingStrategy }
         }
         _modify {
-            optionsLock.lock()
-            var value = options.keyEncodingStrategy
-            defer {
-                options.keyEncodingStrategy = value
-                optionsLock.unlock()
-            }
+            var value = optionsLock.withLock { $0.keyEncodingStrategy }
             yield &value
+            let copy = value
+            optionsLock.withLock { $0.keyEncodingStrategy = copy }
         }
         set {
-            optionsLock.lock()
-            defer { optionsLock.unlock() }
-            options.keyEncodingStrategy = newValue
+            optionsLock.withLock { $0.keyEncodingStrategy = newValue }
         }
     }
 
     /// Contextual user-provided information for use during encoding.
     open var userInfo: [CodingUserInfoKey : Any] {
         get {
-            optionsLock.lock()
-            defer { optionsLock.unlock() }
-            return options.userInfo
+            optionsLock.withLock { $0.userInfo }
         }
         _modify {
-            optionsLock.lock()
-            var value = options.userInfo
-            defer {
-                options.userInfo = value
-                optionsLock.unlock()
-            }
+            var value = optionsLock.withLock { $0.userInfo }
             yield &value
+            nonisolated(unsafe) let copy = value
+            optionsLock.withLock { $0.userInfo = copy }
         }
         set {
-            optionsLock.lock()
-            defer { optionsLock.unlock() }
-            options.userInfo = newValue
+            nonisolated(unsafe) let nv = newValue
+            optionsLock.withLock { $0.userInfo = nv }
         }
     }
 
@@ -328,8 +289,11 @@ open class JSONEncoder {
     }
 
     /// The options set on the top-level encoder.
-    fileprivate var options = _Options()
-    fileprivate let optionsLock = LockedState<Void>()
+    fileprivate var options : _Options {
+        optionsLock.withLock { $0 }
+    }
+    
+    fileprivate let optionsLock = Mutex<_Options>(_Options())
 
     // MARK: - Constructing a JSON Encoder
 

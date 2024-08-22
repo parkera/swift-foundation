@@ -11,6 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 internal import _FoundationCShims
+internal import Synchronization
 
 //===----------------------------------------------------------------------===//
 // Plist Decoder
@@ -40,24 +41,26 @@ open class PropertyListDecoder {
     /// Contextual user-provided information for use during decoding.
     open var userInfo: [CodingUserInfoKey : Any] {
         get {
-            optionsLock.lock()
-            defer { optionsLock.unlock() }
-            return options.userInfo
+            optionsLock.withLock {
+                $0.userInfo
+            }
         }
         _modify {
-            optionsLock.lock()
-            var value = options.userInfo
-            defer {
-                options.userInfo = value
-                optionsLock.unlock()
-            }
+            var value = optionsLock.withLock { $0.userInfo }
             yield &value
+            nonisolated(unsafe) let copy = value
+            optionsLock.withLock { $0.userInfo = copy }
         }
         set {
-            optionsLock.lock()
-            defer { optionsLock.unlock() }
-            options.userInfo = newValue
+            nonisolated(unsafe) let nv = newValue
+            optionsLock.withLock {
+                $0.userInfo = nv
+            }
         }
+    }
+
+    private var options: _Options {
+        optionsLock.withLock { $0 }
     }
 
     /// Options set on the top-level encoder to pass down the decoding hierarchy.
@@ -66,8 +69,7 @@ open class PropertyListDecoder {
     }
 
     /// The options set on the top-level decoder.
-    fileprivate var options = _Options()
-    fileprivate let optionsLock = LockedState<Void>()
+    fileprivate let optionsLock = Mutex(_Options())
 
     // MARK: - Constructing a Property List Decoder
 

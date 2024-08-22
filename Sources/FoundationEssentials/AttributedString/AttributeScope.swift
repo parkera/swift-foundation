@@ -38,6 +38,7 @@ extension AttributeScopes : Sendable {}
 import Darwin
 internal import MachO.dyld
 internal import ReflectionInternal
+internal import Synchronization
 
 fileprivate struct ScopeDescription : Sendable {
     var attributes: [String : any AttributedStringKey.Type] = [:]
@@ -116,7 +117,7 @@ fileprivate struct LoadedScopeCache : Sendable {
     }
 }
 
-fileprivate let _loadedScopeCache = LockedState(initialState: LoadedScopeCache())
+fileprivate let _loadedScopeCache = Mutex(LoadedScopeCache())
 
 internal func _loadDefaultAttributes() -> [String : any AttributedStringKey.Type] {
     // On native macOS, the UI framework that gets loaded is AppKit. On

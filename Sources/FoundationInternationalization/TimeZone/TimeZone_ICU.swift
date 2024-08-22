@@ -10,6 +10,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+internal import Synchronization
+
 #if canImport(FoundationEssentials)
 import FoundationEssentials
 #endif
@@ -67,7 +69,7 @@ internal final class _TimeZoneICU: _TimeZoneProtocol, Sendable {
     }
 
     // Note: it is unsafe to allow the wrapped state (or anything it references) to escape outside of the lock
-    let lock: LockedState<State>
+    let lock: Mutex<State>
     let name: String
     
     deinit {
@@ -93,7 +95,7 @@ internal final class _TimeZoneICU: _TimeZoneProtocol, Sendable {
         }
 
         self.name = name
-        lock = LockedState(initialState: State())
+        lock = Mutex(State())
     }
     
     // MARK: -
