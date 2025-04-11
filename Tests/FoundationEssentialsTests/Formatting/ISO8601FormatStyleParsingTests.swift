@@ -113,6 +113,28 @@ final class ISO8601FormatStyleParsingTests: XCTestCase {
         XCTAssertNotNil(try? iso8601WithFraction.parse(strWithFraction))
     }
     
+    func test_ISO8601FractionalSecondsPrecision() throws {
+        var withFraction = DateComponents.ISO8601FormatStyle(includingFractionalSeconds: true)
+        let strWithFraction = "2022-01-28T15:35:46.123456789Z"
+        
+        // Unspecified precision
+        var comps = try XCTUnwrap(withFraction.parse(strWithFraction))
+        XCTAssertEqual(comps.nanosecond, 123_456_789)
+        
+        withFraction.fractionalSecondsPrecision = 4
+        comps = try XCTUnwrap(withFraction.parse(strWithFraction))
+        XCTAssertEqual(comps.nanosecond, 123_400_000)
+        
+        withFraction.fractionalSecondsPrecision = 9
+        comps = try XCTUnwrap(withFraction.parse(strWithFraction))
+        XCTAssertEqual(comps.nanosecond, 123_456_789)
+        
+        withFraction.fractionalSecondsPrecision = nil
+        comps = try XCTUnwrap(withFraction.parse(strWithFraction))
+        XCTAssertEqual(comps.nanosecond, 123_000_000)
+    }
+
+    
     func test_weekOfYear() throws {
         let iso8601 = Date.ISO8601FormatStyle()
 

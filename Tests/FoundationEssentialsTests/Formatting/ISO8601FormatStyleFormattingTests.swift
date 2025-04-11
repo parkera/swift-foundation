@@ -212,4 +212,46 @@ final class ISO8601FormatStyleFormattingTests: XCTestCase {
         let str = Date.ISO8601FormatStyle().timeZone(separator: .colon).time(includingFractionalSeconds: true).timeSeparator(.colon).format(date)
         XCTAssertEqual(str, "15:35:45.999Z")
     }
+    
+    func test_fractionalSecondsPrecision() {
+        // dateFormatter.date(from: "2021-07-01 15:56:32")!
+        let date = Date(timeIntervalSinceReferenceDate: 646847792.0) // Thursday
+        var style = Date.ISO8601FormatStyle().time(includingFractionalSeconds: true)
+    
+        XCTAssertEqual(date.formatted(style), "15:56:32.000")
+        
+        style.fractionalSecondsPrecision = 1
+        XCTAssertEqual(date.formatted(style), "15:56:32.0")
+
+        style.fractionalSecondsPrecision = 2
+        XCTAssertEqual(date.formatted(style), "15:56:32.00")
+
+        style.fractionalSecondsPrecision = 3
+        XCTAssertEqual(date.formatted(style), "15:56:32.000")
+
+        style.fractionalSecondsPrecision = 4
+        XCTAssertEqual(date.formatted(style), "15:56:32.0000")
+
+        style.fractionalSecondsPrecision = 5
+        XCTAssertEqual(date.formatted(style), "15:56:32.00000")
+
+        style.fractionalSecondsPrecision = 6
+        XCTAssertEqual(date.formatted(style), "15:56:32.000000")
+
+        style.fractionalSecondsPrecision = 7
+        XCTAssertEqual(date.formatted(style), "15:56:32.0000000")
+
+        style.fractionalSecondsPrecision = 8
+        XCTAssertEqual(date.formatted(style), "15:56:32.00000000")
+
+        style.fractionalSecondsPrecision = 9
+        XCTAssertEqual(date.formatted(style), "15:56:32.000000000")
+
+        style.fractionalSecondsPrecision = -1
+        XCTAssertEqual(date.formatted(style), "15:56:32.0")
+
+        style.fractionalSecondsPrecision = 10
+        XCTAssertEqual(date.formatted(style), "15:56:32.000000000")
+
+    }
 }

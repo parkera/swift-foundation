@@ -61,6 +61,15 @@ extension Date {
                 componentsFormatStyle.includingFractionalSeconds = newValue
             }
         }
+        
+        internal var fractionalSecondsPrecision: Int? {
+            get {
+                componentsFormatStyle.fractionalSecondsPrecision
+            }
+            set {
+                componentsFormatStyle.fractionalSecondsPrecision = newValue
+            }
+        }
                 
         public private(set) var timeZoneSeparator: TimeZoneSeparator {
             get {

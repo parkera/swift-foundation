@@ -21,6 +21,10 @@ extension DateComponents {
         public internal(set) var dateSeparator: Date.ISO8601FormatStyle.DateSeparator
         public internal(set) var dateTimeSeparator: Date.ISO8601FormatStyle.DateTimeSeparator
         
+        /// The number of places of precision to include in the formatted fractional seconds. The value is clamped to `1 <= value <= 9` at format or parse time. If `nil`, then a default value is used for formatting, and as many places as are present are parsed when parsing.
+        /// For example, a value of `1` means to include only tenths of a second, `3` includes milliseconds, and `6` includes microseconds.
+        internal var fractionalSecondsPrecision: Int?
+        
         internal struct Fields : Codable, Hashable, OptionSet {
             package var rawValue: UInt
             package init(rawValue: UInt) {
@@ -71,6 +75,7 @@ extension DateComponents {
             case includingFractionalSeconds
             case dateSeparator
             case timeSeparator
+            case fractionalSecondsPrecision
         }
         
         // Encoding
@@ -84,6 +89,7 @@ extension DateComponents {
             includingFractionalSeconds = try c.decode(Bool.self, forKey: .includingFractionalSeconds)
             dateSeparator = try c.decode(Date.ISO8601FormatStyle.DateSeparator.self, forKey: .dateSeparator)
             timeSeparator = try c.decode(Date.ISO8601FormatStyle.TimeSeparator.self, forKey: .timeSeparator)
+            fractionalSecondsPrecision = try c.decodeIfPresent(Int.self, forKey: .fractionalSecondsPrecision)
             
             _calendar = Calendar(identifier: .iso8601)
             _calendar.timeZone = timeZone
@@ -98,6 +104,7 @@ extension DateComponents {
             try c.encode(includingFractionalSeconds, forKey: .includingFractionalSeconds)
             try c.encode(dateSeparator, forKey: .dateSeparator)
             try c.encode(timeSeparator, forKey: .timeSeparator)
+            try c.encodeIfPresent(fractionalSecondsPrecision, forKey: .fractionalSecondsPrecision)
         }
         
         public func hash(into hasher: inout Hasher) {
@@ -346,9 +353,17 @@ extension DateComponents.ISO8601FormatStyle : FormatStyle {
                 
                 if includingFractionalSeconds {
                     let ns = components.nanosecond ?? 0
-                    let ms = Int((Double(ns) / 1_000_000.0).rounded(.towardZero))
+                    let precision = if let fractionalSecondsPrecision {
+                        if fractionalSecondsPrecision < 1 { 1 }
+                        else if fractionalSecondsPrecision > 9 { 9 }
+                        else { fractionalSecondsPrecision }
+                    } else {
+                        3
+                    }
+                    let denominator = 1_000 * precision
+                    let ms = Int((Double(ns) / Double(denominator)).rounded(.towardZero))
                     buffer.appendElement(asciiPeriod)
-                    buffer.append(ms, zeroPad: 3)
+                    buffer.append(ms, zeroPad: precision)
                 }
                 
                 needSeparator = true
@@ -547,7 +562,14 @@ extension DateComponents.ISO8601FormatStyle {
             if let next = it.peek(), next == UInt8(ascii: ".") {
                 // Looks like a fractional seconds
                 let _ = it.next() // consume the period
-                let fractionalSeconds = try it.digits(nanoseconds: true, input: inputString, onFailure: Date.ISO8601FormatStyle(self).format(Date.now))
+                let requestedPrecision: Int? = if let fractionalSecondsPrecision {
+                    if fractionalSecondsPrecision < 1 { 1 }
+                    else if fractionalSecondsPrecision > 9 { 9 }
+                    else { nil }
+                } else {
+                    nil
+                }
+                let fractionalSeconds = try it.digits(minDigits: requestedPrecision, maxDigits: requestedPrecision, nanoseconds: true, input: inputString, onFailure: Date.ISO8601FormatStyle(self).format(Date.now))
                 nanosecond = fractionalSeconds
             }
             
